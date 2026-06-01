@@ -25,15 +25,32 @@ import com.example.viewmodel.TradeViewModel
 fun TradeCalculatorScreen(viewModel: TradeViewModel) {
     val freeMargin by viewModel.freeMargin.collectAsStateWithLifecycle()
     val totalEquity by viewModel.totalEquity.collectAsStateWithLifecycle()
+    val allStrategies by viewModel.allStrategies.collectAsStateWithLifecycle()
+    val allSignalSources by viewModel.allSignalSources.collectAsStateWithLifecycle()
 
     var symbol by remember { mutableStateOf("") }
     var stopLossPercentStr by remember { mutableStateOf("") }
+    
+    var isPercentMode by remember { mutableStateOf(true) }
+    var entryPriceStr by remember { mutableStateOf("") }
+    var stopLossPriceStr by remember { mutableStateOf("") }
+
     var entrySteps by remember { mutableIntStateOf(1) }
 
     var showConfirmDialog by remember { mutableStateOf(false) }
     var selectedRiskPercent by remember { mutableIntStateOf(1) }
 
-    val stopLossPercent = stopLossPercentStr.toDoubleOrNull() ?: 0.0
+    val stopLossPercent = if (isPercentMode) {
+        stopLossPercentStr.toDoubleOrNull() ?: 0.0
+    } else {
+        val entryPrice = entryPriceStr.toDoubleOrNull() ?: 0.0
+        val stopLossPrice = stopLossPriceStr.toDoubleOrNull() ?: 0.0
+        if (entryPrice > 0 && stopLossPrice > 0) {
+            kotlin.math.abs(entryPrice - stopLossPrice) / entryPrice * 100
+        } else {
+            0.0
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -55,14 +72,52 @@ fun TradeCalculatorScreen(viewModel: TradeViewModel) {
             label = { Text("نماد (مثل BTC/USDT)") },
             modifier = Modifier.fillMaxWidth()
         )
+        Spacer(Modifier.height(16.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+            FilterChip(
+                selected = isPercentMode,
+                onClick = { isPercentMode = true },
+                label = { Text("بر اساس درصد") }
+            )
+            Spacer(Modifier.width(16.dp))
+            FilterChip(
+                selected = !isPercentMode,
+                onClick = { isPercentMode = false },
+                label = { Text("بر اساس قیمت") }
+            )
+        }
         Spacer(Modifier.height(8.dp))
-        OutlinedTextField(
-            value = stopLossPercentStr,
-            onValueChange = { stopLossPercentStr = it },
-            label = { Text("حد ضرر (Stop Loss %)") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            modifier = Modifier.fillMaxWidth()
-        )
+        
+        if (isPercentMode) {
+            OutlinedTextField(
+                value = stopLossPercentStr,
+                onValueChange = { stopLossPercentStr = it },
+                label = { Text("حد ضرر (Stop Loss %)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.fillMaxWidth()
+            )
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = entryPriceStr,
+                    onValueChange = { entryPriceStr = it },
+                    label = { Text("قیمت ورود") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.weight(1f)
+                )
+                OutlinedTextField(
+                    value = stopLossPriceStr,
+                    onValueChange = { stopLossPriceStr = it },
+                    label = { Text("قیمت حد ضرر") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            if (stopLossPercent > 0) {
+                Spacer(Modifier.height(8.dp))
+                Text("درصد حد ضرر محاسبه شده: ${String.format("%.2f", stopLossPercent)}%", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+            }
+        }
         Spacer(Modifier.height(16.dp))
         Text("تعداد پله‌های ورود")
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -102,9 +157,11 @@ fun TradeCalculatorScreen(viewModel: TradeViewModel) {
             freeMargin = freeMargin,
             stopLossPercent = stopLossPercent,
             entrySteps = entrySteps,
+            strategies = allStrategies,
+            signalSources = allSignalSources,
             onDismiss = { showConfirmDialog = false },
-            onConfirm = { isLong, leverage, lockedMargin, positionSize ->
-                viewModel.addTrade(symbol.ifEmpty { "UNKNOWN" }, isLong, selectedRiskPercent, positionSize, entrySteps, leverage, lockedMargin)
+            onConfirm = { isLong, leverage, lockedMargin, positionSize, strategy, signalSource ->
+                viewModel.addTrade(symbol.ifEmpty { "UNKNOWN" }, isLong, selectedRiskPercent, positionSize, entrySteps, leverage, lockedMargin, strategy, signalSource)
                 showConfirmDialog = false
                 symbol = ""
                 stopLossPercentStr = ""
@@ -167,6 +224,7 @@ fun RiskBox(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConfirmTradeDialog(
     symbol: String,
@@ -174,13 +232,21 @@ fun ConfirmTradeDialog(
     freeMargin: Double,
     stopLossPercent: Double,
     entrySteps: Int,
+    strategies: List<String>,
+    signalSources: List<String>,
     onDismiss: () -> Unit,
-    onConfirm: (Boolean, Int, Double, Double) -> Unit
+    onConfirm: (Boolean, Int, Double, Double, String, String) -> Unit
 ) {
     var leverage by remember { mutableFloatStateOf(10f) }
     val leverageInt = leverage.toInt()
     var isLong by remember { mutableStateOf(true) }
     
+    var strategy by remember { mutableStateOf("") }
+    var strategyExpanded by remember { mutableStateOf(false) }
+    
+    var signalSource by remember { mutableStateOf("") }
+    var signalExpanded by remember { mutableStateOf(false) }
+
     val riskDollar = freeMargin * (riskPercent / 100.0)
     val positionSize = if (stopLossPercent > 0) riskDollar / (stopLossPercent / 100.0) else 0.0
     val calcMargin = positionSize / leverageInt
@@ -190,7 +256,7 @@ fun ConfirmTradeDialog(
         onDismissRequest = onDismiss,
         title = { Text("تایید موقعیت") },
         text = {
-            Column {
+            Column(modifier = Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState())) {
                 Text("نماد: ${if(symbol.isEmpty()) "نامشخص" else symbol}")
                 Text("مقدار ریسک: $riskPercent% ($${String.format("%.2f", riskDollar)})")
                 Text("حجم کل پوزیشن: $${String.format("%,.2f", positionSize)}")
@@ -202,6 +268,72 @@ fun ConfirmTradeDialog(
                     Spacer(Modifier.width(8.dp))
                     FilterChip(selected = !isLong, onClick = { isLong = false }, label = { Text("SHORT") })
                 }
+                Spacer(Modifier.height(16.dp))
+                
+                ExposedDropdownMenuBox(
+                    expanded = strategyExpanded,
+                    onExpandedChange = { strategyExpanded = !strategyExpanded }
+                ) {
+                    OutlinedTextField(
+                        value = strategy,
+                        onValueChange = { strategy = it; strategyExpanded = true },
+                        label = { Text("استراتژی (مثلاً پرایس اکشن)") },
+                        modifier = Modifier.fillMaxWidth().menuAnchor()
+                    )
+                    if (strategies.isNotEmpty()) {
+                        val filteredStrategies = strategies.filter { it.contains(strategy, ignoreCase = true) }
+                        if (filteredStrategies.isNotEmpty()) {
+                            ExposedDropdownMenu(
+                                expanded = strategyExpanded,
+                                onDismissRequest = { strategyExpanded = false }
+                            ) {
+                                filteredStrategies.forEach { item ->
+                                    DropdownMenuItem(
+                                        text = { Text(item) },
+                                        onClick = {
+                                            strategy = item
+                                            strategyExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+                
+                ExposedDropdownMenuBox(
+                    expanded = signalExpanded,
+                    onExpandedChange = { signalExpanded = !signalExpanded }
+                ) {
+                    OutlinedTextField(
+                        value = signalSource,
+                        onValueChange = { signalSource = it; signalExpanded = true },
+                        label = { Text("منبع سیگنال (مثلاً کانال VIP)") },
+                        modifier = Modifier.fillMaxWidth().menuAnchor()
+                    )
+                    if (signalSources.isNotEmpty()) {
+                        val filteredSources = signalSources.filter { it.contains(signalSource, ignoreCase = true) }
+                        if (filteredSources.isNotEmpty()) {
+                            ExposedDropdownMenu(
+                                expanded = signalExpanded,
+                                onDismissRequest = { signalExpanded = false }
+                            ) {
+                                filteredSources.forEach { item ->
+                                    DropdownMenuItem(
+                                        text = { Text(item) },
+                                        onClick = {
+                                            signalSource = item
+                                            signalExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                
                 Spacer(Modifier.height(24.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text("${leverageInt}x", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
@@ -227,7 +359,7 @@ fun ConfirmTradeDialog(
             }
         },
         confirmButton = {
-            Button(onClick = { onConfirm(isLong, leverageInt, calcMargin, positionSize) }, enabled = isMarginOk && leverageInt > 0) {
+            Button(onClick = { onConfirm(isLong, leverageInt, calcMargin, positionSize, strategy, signalSource) }, enabled = isMarginOk && leverageInt > 0) {
                 Text("تایید")
             }
         },

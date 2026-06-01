@@ -20,5 +20,7 @@ data class Trade(
     val isClosed: Boolean = false,
     val pnl: Double? = null,
     val psychologicalReason: String? = null,
-    val closedTimestamp: Long? = null
+    val closedTimestamp: Long? = null,
+    val strategy: String? = null,
+    val signalSource: String? = null
 )

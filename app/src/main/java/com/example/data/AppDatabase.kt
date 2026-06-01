@@ -8,7 +8,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [Trade::class], version = 2, exportSchema = false)
+@Database(entities = [Trade::class], version = 3, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun tradeDao(): TradeDao
 
@@ -22,6 +22,13 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE trades ADD COLUMN canceledSteps INTEGER NOT NULL DEFAULT 0")
             }
         }
+        
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE trades ADD COLUMN strategy TEXT")
+                db.execSQL("ALTER TABLE trades ADD COLUMN signalSource TEXT")
+            }
+        }
 
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
@@ -30,7 +37,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "trade_journal_database"
                 )
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE = instance

@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+import kotlinx.coroutines.flow.map
+
 class TradeViewModel(application: Application) : AndroidViewModel(application) {
     private val database = AppDatabase.getDatabase(application)
     private val repository = TradeRepository(database.tradeDao())
@@ -22,6 +24,20 @@ class TradeViewModel(application: Application) : AndroidViewModel(application) {
     init {
         // Sample data generation removed
     }
+
+    val allTrades: StateFlow<List<Trade>> = repository.allTrades.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
+
+    val allStrategies: StateFlow<List<String>> = repository.allTrades.map { trades ->
+        trades.mapNotNull { it.strategy }.filter { it.isNotBlank() }.distinct().sorted()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allSignalSources: StateFlow<List<String>> = repository.allTrades.map { trades ->
+        trades.mapNotNull { it.signalSource }.filter { it.isNotBlank() }.distinct().sorted()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val openTrades: StateFlow<List<Trade>> = repository.openTrades.stateIn(
         scope = viewModelScope,
@@ -57,7 +73,9 @@ class TradeViewModel(application: Application) : AndroidViewModel(application) {
         totalPositionSize: Double,
         entrySteps: Int,
         leverage: Int,
-        lockedMargin: Double
+        lockedMargin: Double,
+        strategy: String? = null,
+        signalSource: String? = null
     ) {
         viewModelScope.launch {
             val trade = Trade(
@@ -67,7 +85,9 @@ class TradeViewModel(application: Application) : AndroidViewModel(application) {
                 totalPositionSize = totalPositionSize,
                 entrySteps = entrySteps,
                 leverage = leverage,
-                lockedMargin = lockedMargin
+                lockedMargin = lockedMargin,
+                strategy = strategy,
+                signalSource = signalSource
             )
             repository.insert(trade)
         }

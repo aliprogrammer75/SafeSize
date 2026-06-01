@@ -206,6 +206,30 @@ fun TradeCard(
                 }
             }
 
+            if (!trade.strategy.isNullOrBlank() || !trade.signalSource.isNullOrBlank()) {
+                Spacer(Modifier.height(12.dp))
+                @OptIn(ExperimentalLayoutApi::class)
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    if (!trade.strategy.isNullOrBlank()) {
+                        SuggestionChip(
+                            onClick = {},
+                            label = { Text("استراتژی: ${trade.strategy}", fontSize = 10.sp) },
+                            colors = SuggestionChipDefaults.suggestionChipColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha=0.5f))
+                        )
+                    }
+                    if (!trade.signalSource.isNullOrBlank()) {
+                        SuggestionChip(
+                            onClick = {},
+                            label = { Text("منبع: ${trade.signalSource}", fontSize = 10.sp) },
+                            colors = SuggestionChipDefaults.suggestionChipColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha=0.5f))
+                        )
+                    }
+                }
+            }
+
             if (trade.isClosed) {
                 Spacer(Modifier.height(12.dp))
                 Text("دلیل بسته شدن: ${trade.psychologicalReason}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.clickable
@@ -29,10 +30,24 @@ import java.util.Locale
 import com.example.data.Trade
 import com.example.viewmodel.TradeViewModel
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TradeAnalyticsScreen(viewModel: TradeViewModel) {
     val closedTrades by viewModel.closedTrades.collectAsStateWithLifecycle()
+    val allStrategies by viewModel.allStrategies.collectAsStateWithLifecycle()
+    val allSignalSources by viewModel.allSignalSources.collectAsStateWithLifecycle()
     var showCalendar by remember { mutableStateOf(false) }
+    
+    var selectedStrategy by remember { mutableStateOf("همه") }
+    var strategyExpanded by remember { mutableStateOf(false) }
+
+    var selectedSource by remember { mutableStateOf("همه") }
+    var sourceExpanded by remember { mutableStateOf(false) }
+
+    val filteredTrades = closedTrades.filter { trade ->
+        (selectedStrategy == "همه" || trade.strategy == selectedStrategy) &&
+        (selectedSource == "همه" || trade.signalSource == selectedSource)
+    }
 
     Column(
         modifier = Modifier
@@ -43,20 +58,85 @@ fun TradeAnalyticsScreen(viewModel: TradeViewModel) {
     ) {
         Text("تحلیل‌ها و بینش‌ها", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
 
+        // Filters
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ExposedDropdownMenuBox(
+                expanded = strategyExpanded,
+                onExpandedChange = { strategyExpanded = !strategyExpanded },
+                modifier = Modifier.weight(1f)
+            ) {
+                OutlinedTextField(
+                    readOnly = true,
+                    value = selectedStrategy,
+                    onValueChange = { },
+                    label = { Text("استراتژی", fontSize = 12.sp) },
+                    modifier = Modifier.fillMaxWidth().menuAnchor(),
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = strategyExpanded) },
+                    textStyle = MaterialTheme.typography.bodySmall
+                )
+                ExposedDropdownMenu(
+                    expanded = strategyExpanded,
+                    onDismissRequest = { strategyExpanded = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("همه") },
+                        onClick = { strategyExpanded = false; selectedStrategy = "همه" }
+                    )
+                    allStrategies.forEach { item ->
+                        DropdownMenuItem(
+                            text = { Text(item) },
+                            onClick = { strategyExpanded = false; selectedStrategy = item }
+                        )
+                    }
+                }
+            }
+
+            ExposedDropdownMenuBox(
+                expanded = sourceExpanded,
+                onExpandedChange = { sourceExpanded = !sourceExpanded },
+                modifier = Modifier.weight(1f)
+            ) {
+                OutlinedTextField(
+                    readOnly = true,
+                    value = selectedSource,
+                    onValueChange = { },
+                    label = { Text("منبع", fontSize = 12.sp) },
+                    modifier = Modifier.fillMaxWidth().menuAnchor(),
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = sourceExpanded) },
+                    textStyle = MaterialTheme.typography.bodySmall
+                )
+                ExposedDropdownMenu(
+                    expanded = sourceExpanded,
+                    onDismissRequest = { sourceExpanded = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("همه") },
+                        onClick = { sourceExpanded = false; selectedSource = "همه" }
+                    )
+                    allSignalSources.forEach { item ->
+                        DropdownMenuItem(
+                            text = { Text(item) },
+                            onClick = { sourceExpanded = false; selectedSource = item }
+                        )
+                    }
+                }
+            }
+        }
+
         // 1. PnL Chart
         Text("نمودار سود و زیان (PnL)", style = MaterialTheme.typography.titleMedium)
         PnLChart(
-            trades = closedTrades.reversed(), // Oldest to newest for plotting
+            trades = filteredTrades.reversed(), // Oldest to newest for plotting
             onClick = { showCalendar = true }
         )
 
         // 2. Best Pair Logic
-        val bestPair = closedTrades
+        val bestPair = filteredTrades
             .groupBy { it.symbol }
             .mapValues { entry -> entry.value.sumOf { it.pnl ?: 0.0 } }
             .maxByOrNull { it.value }
 
-        if (bestPair != null && closedTrades.isNotEmpty()) {
+        if (bestPair != null && filteredTrades.isNotEmpty()) {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text("بهترین جفت ارز معامله شده", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -65,7 +145,7 @@ fun TradeAnalyticsScreen(viewModel: TradeViewModel) {
                         Text(bestPair.key, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                         Text("+$${String.format("%.2f", bestPair.value)}", style = MaterialTheme.typography.headlineSmall, color = Color(0xFF4CAF50))
                     }
-                    val pairTrades = closedTrades.filter { it.symbol == bestPair.key }
+                    val pairTrades = filteredTrades.filter { it.symbol == bestPair.key }
                     val pairWins = pairTrades.count { (it.pnl ?: 0.0) > 0 }
                     val pairWinRate = (pairWins.toDouble() / pairTrades.size) * 100
                     Text("نرخ برد: ${String.format("%.1f%%", pairWinRate)} در ${pairTrades.size} معامله", style = MaterialTheme.typography.bodySmall)
@@ -74,8 +154,8 @@ fun TradeAnalyticsScreen(viewModel: TradeViewModel) {
         }
 
         // 3. Psychology Analysis
-        val wins = closedTrades.filter { (it.pnl ?: 0.0) > 0 }
-        val losses = closedTrades.filter { (it.pnl ?: 0.0) <= 0 }
+        val wins = filteredTrades.filter { (it.pnl ?: 0.0) > 0 }
+        val losses = filteredTrades.filter { (it.pnl ?: 0.0) <= 0 }
 
         val topWinReasons = wins.groupBy { it.psychologicalReason ?: "نامشخص" }
             .mapValues { it.value.size }
@@ -105,7 +185,7 @@ fun TradeAnalyticsScreen(viewModel: TradeViewModel) {
     }
 
     if (showCalendar) {
-        CalendarDialog(trades = closedTrades, onDismiss = { showCalendar = false })
+        CalendarDialog(trades = filteredTrades, onDismiss = { showCalendar = false })
     }
 }
 
