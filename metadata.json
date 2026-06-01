@@ -1,0 +1,6 @@
+{
+  "name": "Trade Size",
+  "description": "ژورنال معاملاتی و مدیریت ریسک فارسی",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
