@@ -93,15 +93,34 @@ class TradeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun closeTrade(trade: Trade, pnl: Double, psychologicalReason: String) {
+    fun closeTrade(trade: Trade, pnl: Double, psychologicalReason: String, closePercentage: Float = 100f) {
         viewModelScope.launch {
-            val updatedTrade = trade.copy(
-                isClosed = true,
-                pnl = pnl,
-                psychologicalReason = psychologicalReason,
-                closedTimestamp = System.currentTimeMillis()
-            )
-            repository.update(updatedTrade)
+            if (closePercentage >= 100f) {
+                val updatedTrade = trade.copy(
+                    isClosed = true,
+                    pnl = pnl,
+                    psychologicalReason = psychologicalReason,
+                    closedTimestamp = System.currentTimeMillis()
+                )
+                repository.update(updatedTrade)
+            } else {
+                val ratio = (closePercentage / 100f).toDouble()
+                val closedTrade = trade.copy(
+                    id = 0,
+                    isClosed = true,
+                    totalPositionSize = trade.totalPositionSize * ratio,
+                    lockedMargin = trade.lockedMargin * ratio,
+                    pnl = pnl,
+                    psychologicalReason = psychologicalReason,
+                    closedTimestamp = System.currentTimeMillis()
+                )
+                val remainingTrade = trade.copy(
+                    totalPositionSize = trade.totalPositionSize * (1.0 - ratio),
+                    lockedMargin = trade.lockedMargin * (1.0 - ratio)
+                )
+                repository.insert(closedTrade)
+                repository.update(remainingTrade)
+            }
         }
     }
 

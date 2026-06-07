@@ -97,8 +97,8 @@ fun TradeJournalScreen(viewModel: TradeViewModel) {
         CloseTradeDialog(
             trade = trade,
             onDismiss = { tradeToClose = null },
-            onConfirm = { pnl, reason ->
-                viewModel.closeTrade(trade, pnl, reason)
+            onConfirm = { pnl, reason, percentage ->
+                viewModel.closeTrade(trade, pnl, reason, percentage)
                 tradeToClose = null
             }
         )
@@ -257,12 +257,13 @@ fun TradeCard(
 fun CloseTradeDialog(
     trade: Trade,
     onDismiss: () -> Unit,
-    onConfirm: (Double, String) -> Unit
+    onConfirm: (Double, String, Float) -> Unit
 ) {
     var pnlStr by remember { mutableStateOf("") }
     val pnl = pnlStr.toDoubleOrNull() ?: 0.0
     val selectedReasons = remember { mutableStateListOf<String>() }
     var customNote by remember { mutableStateOf("") }
+    var closePercentage by remember { mutableStateOf(100f) }
     
     val positiveReasons = listOf("پایبندی به استراتژی", "برخورد به تارگت (TP)", "ورود با تاییدیه", "نقطه ورود بهینه", "معامله در جهت روند", "مدیریت ریسک دقیق", "سیو سود پله‌ای", "ریسک‌فری (Risk-Free)", "صبر و خونسردی", "خروج دستی بموقع", "تشخیص درست الگو", "خروج قبل از خبر", "کنترل طمع", "نسبت R/R عالی", "مومنتوم قوی")
     val negativeReasons = listOf("فومو (FOMO)", "طمع", "ترید انتقامی", "جابجایی استاپ‌لاس", "ورود زودهنگام", "حجم/اهرم بالا", "معامله خلاف روند", "خروج از روی ترس", "اورترید (Overtrading)", "نوسان خبر", "خستگی/عدم تمرکز", "ترید با سیگنال", "بازار رِنج و خنثی", "تحلیل اشتباه", "تردید و تاخیر در ورود")
@@ -279,7 +280,15 @@ fun CloseTradeDialog(
         onDismissRequest = onDismiss,
         title = { Text("بستن موقعیت") },
         text = {
-            Column {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                Text("درصد بستن پوزیشن: ${closePercentage.toInt()}%", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                androidx.compose.material3.Slider(
+                    value = closePercentage,
+                    onValueChange = { closePercentage = it },
+                    valueRange = 10f..100f,
+                    steps = 8 // 10, 20, 30, 40, 50, 60, 70, 80, 90 (9 steps means 10 values) -> wait, range is 90. 9 breaks means 10 intervals -> each is 9. Let's not use steps or use 8 for 10% steps.
+                )
+                Spacer(Modifier.height(16.dp))
                 OutlinedTextField(
                     value = pnlStr,
                     onValueChange = { pnlStr = it },
@@ -322,7 +331,7 @@ fun CloseTradeDialog(
         confirmButton = {
             Button(onClick = { 
                 val finalReasonStr = selectedReasons.joinToString("، ") + if (customNote.isNotBlank()) " | یادداشت: $customNote" else ""
-                onConfirm(pnl, finalReasonStr) 
+                onConfirm(pnl, finalReasonStr, closePercentage) 
             }, enabled = selectedReasons.isNotEmpty() || customNote.isNotBlank()) {
                 Text("تایید نهایی")
             }

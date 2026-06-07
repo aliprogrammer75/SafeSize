@@ -188,8 +188,8 @@ fun DashboardScreen(viewModel: TradeViewModel) {
         CloseTradeDialog(
             trade = trade,
             onDismiss = { tradeToClose = null },
-            onConfirm = { pnl, reason ->
-                viewModel.closeTrade(trade, pnl, reason)
+            onConfirm = { pnl, reason, percentage ->
+                viewModel.closeTrade(trade, pnl, reason, percentage)
                 tradeToClose = null
             }
         )
