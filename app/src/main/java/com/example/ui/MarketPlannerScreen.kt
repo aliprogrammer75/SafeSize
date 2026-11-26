@@ -178,7 +178,7 @@ fun MarketPlannerScreen(onManual: () -> Unit, onWatch: () -> Unit) {
                 Text(d.symbol+" • "+d.side+" • "+v.leverage+"x "+v.marginMode)
                 Text("حجم: "+d.qty+" | ورود: "+d.price)
                 Text("SL: "+d.sl+" | TP: "+d.tp.ifBlank{"—"})
-                Text("مارجین تقریبی: "+fmtShort(d.qty.toBigDecimal()*d.price.toBigDecimal()/BigDecimal(v.leverage))+" USDT")
+                Text("مارجین تقریبی: "+fmtShort((d.qty.toBigDecimal()*d.price.toBigDecimal()).divide(BigDecimal(v.leverage),8,RoundingMode.UP))+" USDT")
                 Text("این درخواست واقعی است؛ اجرا و حد ضرر در قیمت دقیق تضمین نمی‌شود.",color=MaterialTheme.colorScheme.error)
             }
         },confirmButton={Button(enabled=!busy && confirmed && unresolved.isBlank(),onClick={

@@ -51,13 +51,13 @@ internal object MarketData {
         val a = request("kline", "?symbol=" + symbol + "&interval=" + interval + "&limit=100&type=LAST_PRICE")
         (0 until a.length()).map { i -> a.getJSONObject(i).let { c ->
             Candle(c.getLong("time"), c.getString("open").toDouble(), c.getString("high").toDouble(), c.getString("low").toDouble(), c.getString("close").toDouble(), c.getString("baseVol").toDouble())
-        } }.filter { listOf(it.open,it.high,it.low,it.close,it.volume).all { v -> v.isFinite() } && it.low > 0 && it.high >= it.low && it.open in it.low..it.high && it.close in it.low..it.high }
+        } }.filter { listOf(it.open,it.high,it.low,it.close,it.volume).all { v -> v.isFinite() } && it.volume >= 0 && it.low > 0 && it.high >= it.low && it.open in it.low..it.high && it.close in it.low..it.high }
             .distinctBy { it.time }.sortedBy { it.time }
     }
     fun size(pair: MarketPair, available: BigDecimal, percent: BigDecimal, entry: BigDecimal, stop: BigDecimal, target: BigDecimal?, long: Boolean, feePct: BigDecimal): Sizing {
         require(available.signum() > 0 && percent.signum() > 0 && percent <= BigDecimal("100"))
         require(entry.signum() > 0 && stop.signum() > 0 && if (long) stop < entry else stop > entry)
-        require(target == null || target.signum() > 0 && if (long) target > entry else target < entry)
+        require(target == null || (target.signum() > 0 && (if (long) target > entry else target < entry)))
         require(feePct >= BigDecimal.ZERO && feePct <= BigDecimal("5"))
         require(listOfNotNull(entry,stop,target).all { it.stripTrailingZeros().scale() <= pair.pricePrecision })
         val fee = feePct.movePointLeft(2)
