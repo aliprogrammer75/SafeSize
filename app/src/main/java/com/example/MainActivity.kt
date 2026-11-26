@@ -40,6 +40,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.ui.DashboardScreen
+import com.example.ui.BitunixTradingScreen
 import com.example.ui.TradeAnalyticsScreen
 import com.example.ui.TradeCalculatorScreen
 import com.example.ui.TradeJournalScreen
@@ -89,7 +90,8 @@ fun MainScreen() {
                     Triple("dashboard", "داشبورد", Icons.Filled.Home),
                     Triple("calculator", "ماشین حساب", Icons.Filled.Add),
                     Triple("journal", "ژورنال", Icons.Filled.List),
-                    Triple("analytics", "تحلیل‌ها", Icons.Filled.Info)
+                    Triple("analytics", "تحلیل‌ها", Icons.Filled.Info),
+                    Triple("exchange", "معامله", Icons.Filled.Settings)
                 )
                 
                 items.forEach { (route, label, icon) ->
@@ -121,6 +123,7 @@ fun MainScreen() {
             composable("calculator") { TradeCalculatorScreen(viewModel) }
             composable("journal") { TradeJournalScreen(viewModel) }
             composable("analytics") { TradeAnalyticsScreen(viewModel) }
+            composable("exchange") { BitunixTradingScreen() }
         }
     }
 }

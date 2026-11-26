@@ -72,7 +72,7 @@ fun BitunixAccountCard() {
                 Column(Modifier.weight(1f)) {
                     Text("حساب فیوچرز Bitunix", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Text(
-                        when { busy -> "در حال همگام‌سازی"; error != null -> "همگام‌سازی ناموفق"; snapshot != null -> "آخرین دریافت موفق"; else -> "اتصال فقط خواندنی" },
+                        when { busy -> "در حال همگام‌سازی"; error != null -> "همگام‌سازی ناموفق"; snapshot != null -> "آخرین دریافت موفق"; else -> "اتصال حساب" },
                         style = MaterialTheme.typography.labelMedium,
                         color = when { error != null -> MaterialTheme.colorScheme.error; snapshot != null -> MaterialTheme.colorScheme.tertiary; else -> MaterialTheme.colorScheme.onSurfaceVariant }
                     )
@@ -116,7 +116,7 @@ fun BitunixAccountCard() {
                 }
             }
             if (!configured && snapshot == null) {
-                Text("موجودی و پوزیشن‌های واقعی را بدون مجوز ثبت سفارش مشاهده کنید.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("موجودی و پوزیشن‌ها را مشاهده کنید. برای معامله، از تب معامله استفاده کنید.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Button(onClick = { edit = true }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("اتصال حساب بیت‌یونیکس") }
                 if (error != null) TextButton(onClick = { confirmDisconnect = true }, enabled = !busy) { Text("پاک کردن کلید ذخیره‌شده") }
             } else {
@@ -136,7 +136,7 @@ fun BitunixAccountCard() {
             title = { Text("اتصال امن به Bitunix") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("در صرافی کلید فقط خواندنی بسازید. مجوز معامله و برداشت را فعال نکنید.")
+                    Text("در صرافی کلید با مجوز خواندن و در صورت نیاز معامله بسازید. مجوز برداشت و انتقال را فعال نکنید.")
                     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                         OutlinedTextField(apiKey, { apiKey = it }, label = { Text("API Key") }, singleLine = true,
                             visualTransformation = PasswordVisualTransformation(), enabled = !busy, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
