@@ -30,28 +30,64 @@ fun BitunixAccountCard() {
     val vault = remember(context) { BitunixVault(context) }
     val scope = rememberCoroutineScope()
     var snapshot by remember { mutableStateOf<BitunixSnapshot?>(null) }
+    var positionsLoaded by remember { mutableStateOf(false) }
     var configured by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var edit by remember { mutableStateOf(false) }
     var confirmDisconnect by remember { mutableStateOf(false) }
     fun failure(e: Exception): String = when (e) {
-        is BitunixApiException -> "خطای اتصال صرافی (" + e.code + ")؛ مجوز خواندن، کلید، IP و ساعت دستگاه را بررسی کنید."
-        else -> "دریافت اطلاعات یا دسترسی به کلید ذخیره‌شده ممکن نبود. اینترنت و تنظیمات اتصال را بررسی کنید."
+        is BitunixApiException -> {
+            val explanation = if (e.http) when (e.code) {
+                401 -> "احراز هویت HTTP ناموفق"
+                403 -> "دسترسی HTTP رد شد؛ محدودیت سرویس یا شبکه را بررسی کنید"
+                429 -> "تعداد درخواست‌ها زیاد است"
+                else -> "پاسخ HTTP ناموفق"
+            } else when (e.code) {
+                403 -> "کلید مجوز این عملیات را ندارد"
+                10002 -> "پارامتر درخواست نامعتبر است"
+                10003 -> "کلید API خالی است"
+                10004 -> "IP فعلی در فهرست مجاز کلید نیست"
+                10007 -> "امضای درخواست نامعتبر است؛ کلید و Secret را بررسی کنید"
+                10010 -> "طول nonce نامعتبر است"
+                10011 -> "اختلاف ساعت دستگاه با صرافی؛ تاریخ و ساعت خودکار را فعال کنید"
+                10005, 10006 -> "درخواست بیش از حد مجاز"
+                else -> "درخواست از طرف صرافی رد شد"
+            }
+            e.stage + " | " + (if (e.http) "HTTP " else "API ") + e.code + " — " + explanation
+        }
+        is BitunixConnectionException -> e.stage + " | " + e.category + " — " + when (e.category) {
+            "DNS" -> "دامنه صرافی پیدا نشد"
+            "TIMEOUT" -> "زمان پاسخ به پایان رسید"
+            "TLS" -> "اتصال امن برقرار نشد"
+            "CONNECT", "NETWORK_IO" -> "ارتباط شبکه برقرار نشد"
+            "ACCOUNT_USDT_MISSING" -> "حساب فیوچرز USDT در پاسخ یافت نشد"
+            else -> "ساختار پاسخ صرافی با انتظار برنامه متفاوت است"
+        }
+        is java.security.GeneralSecurityException -> "ذخیره یا خواندن کلید | KEYSTORE"
+        else -> "خطای داخلی در اتصال | " + e.javaClass.simpleName
     }
     suspend fun refresh(newCredentials: BitunixCredentials? = null) {
         if (busy) return
         busy = true
         error = null
+        positionsLoaded = false
         try {
             val credentials = newCredentials ?: withContext(Dispatchers.IO) { vault.load() }
             if (credentials != null) {
                 if (newCredentials == null) configured = true
-                val fresh = BitunixClient.fetch(credentials)
-                if (newCredentials != null) withContext(Dispatchers.IO) { vault.save(credentials) }
+                val fresh = BitunixClient.fetchAccount(credentials)
+                if (newCredentials != null) {
+                    try { withContext(Dispatchers.IO) { vault.save(credentials) } }
+                    catch (e: CancellationException) { throw e }
+                    catch (_: Exception) { throw BitunixConnectionException("ذخیره کلید", "KEYSTORE") }
+                }
                 configured = true
                 snapshot = fresh
                 edit = false
+                val positions = BitunixClient.fetchPositions(credentials)
+                snapshot = fresh.copy(positions = positions)
+                positionsLoaded = true
             } else {
                 configured = false
                 snapshot = null
@@ -98,8 +134,9 @@ fun BitunixAccountCard() {
                     style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 HorizontalDivider()
                 Text("پوزیشن‌های باز صرافی", fontWeight = FontWeight.SemiBold)
-                if (s.positions.isEmpty()) Text("پوزیشن بازی دریافت نشد.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                s.positions.forEach { p ->
+                if (!positionsLoaded) Text("اطلاعات پوزیشن هنوز تأیید نشده است.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                else if (s.positions.isEmpty()) Text("هیچ پوزیشن بازی وجود ندارد.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (positionsLoaded) s.positions.forEach { p ->
                     Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant) {
                         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -161,7 +198,7 @@ fun BitunixAccountCard() {
             confirmDisconnect = false
             scope.launch {
                 busy = true
-                try { withContext(Dispatchers.IO) { vault.clear() }; configured = false; snapshot = null; error = null }
+                try { withContext(Dispatchers.IO) { vault.clear() }; configured = false; snapshot = null; positionsLoaded = false; error = null }
                 catch (e: CancellationException) { throw e }
                 catch (e: Exception) { error = failure(e) }
                 finally { busy = false }

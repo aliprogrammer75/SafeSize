@@ -25,7 +25,8 @@ internal data class BitunixCredentials(val apiKey: String, val secret: String, v
 internal data class BitunixPosition(val symbol: String, val side: String, val leverage: String, val entry: String, val margin: String, val pnl: String, val id: String, val qty: String, val mode: String)
 internal data class BitunixSnapshot(val available: String, val margin: String, val frozen: String, val crossPnl: String, val isolatedPnl: String, val positions: List<BitunixPosition>, val fetchedAt: Long)
 
-internal class BitunixApiException(val code: Int) : Exception("Bitunix API error")
+internal class BitunixApiException(val code: Int, val stage: String = "", val http: Boolean = false) : Exception("Bitunix API error")
+internal class BitunixConnectionException(val stage: String, val category: String) : Exception("Bitunix connection error")
 
 // Keys never leave this device except the API key in authenticated HTTPS headers.
 // Ciphertext is excluded from Android backup; the AES key is non-exportable.
@@ -80,6 +81,11 @@ internal object BitunixClient {
         val nonce = hex(ByteArray(8).also { random.nextBytes(it) })
         val timestamp = System.currentTimeMillis().toString()
         val digest = sha(nonce + timestamp + credentials.apiKey + canonical + (body ?: ""))
+        val stage = when (path) {
+            "/api/v1/futures/account" -> "دریافت موجودی"
+            "/api/v1/futures/position/get_pending_positions" -> "دریافت پوزیشن‌ها"
+            else -> "درخواست صرافی"
+        }
         val connection = URL("https://fapi.bitunix.com" + path + query).openConnection() as HttpsURLConnection
         try {
             connection.requestMethod = if (body == null) "GET" else "POST"
@@ -92,6 +98,8 @@ internal object BitunixClient {
             connection.setRequestProperty("sign", sha(digest + credentials.secret))
             connection.setRequestProperty("language", "en-US")
             connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("User-Agent", "SafeSize-Android/1.1")
             if (body != null) {
                 val bytes = body.toByteArray(Charsets.UTF_8)
                 connection.doOutput = true
@@ -99,23 +107,54 @@ internal object BitunixClient {
                 connection.setFixedLengthStreamingMode(bytes.size)
                 connection.outputStream.use { it.write(bytes) }
             }
-            if (connection.responseCode !in 200..299) throw BitunixApiException(connection.responseCode)
+            val http = connection.responseCode
+            if (http !in 200..299) throw BitunixApiException(http, stage, true)
             val json = connection.inputStream.bufferedReader(Charsets.UTF_8).use { JSONObject(it.readText()) }
             val code = json.getInt("code")
-            if (code != 0) throw BitunixApiException(code)
+            if (code != 0) throw BitunixApiException(code, stage)
             return json
-        } finally { connection.disconnect() }
+        } catch (e: BitunixApiException) { throw e }
+        catch (e: java.net.UnknownHostException) { throw BitunixConnectionException(stage, "DNS") }
+        catch (e: java.net.SocketTimeoutException) { throw BitunixConnectionException(stage, "TIMEOUT") }
+        catch (e: javax.net.ssl.SSLException) { throw BitunixConnectionException(stage, "TLS") }
+        catch (e: java.net.ConnectException) { throw BitunixConnectionException(stage, "CONNECT") }
+        catch (e: org.json.JSONException) { throw BitunixConnectionException(stage, "RESPONSE_JSON") }
+        catch (e: java.io.IOException) { throw BitunixConnectionException(stage, "NETWORK_IO") }
+        finally { connection.disconnect() }
     }
-    suspend fun fetch(credentials: BitunixCredentials): BitunixSnapshot = withContext(Dispatchers.IO) {
-        val result = get(credentials, "/api/v1/futures/account", "?marginCoin=USDT", "marginCoinUSDT")
-        val account = result.getJSONArray("data").getJSONObject(0)
-        val data = get(credentials, "/api/v1/futures/position/get_pending_positions", "?includeSubAccounts=false", "includeSubAccountsfalse").getJSONArray("data")
-        val positions = (0 until data.length()).map { i ->
-            val p = data.getJSONObject(i)
-            BitunixPosition(p.getString("symbol"), p.getString("side"), p.getString("leverage"), p.getString("avgOpenPrice"), p.getString("margin"), p.getString("unrealizedPNL"), p.getString("positionId"), p.getString("qty"), p.getString("positionMode"))
+    private fun accountFrom(result: JSONObject): JSONObject {
+        val data = result.opt("data")
+        return when (data) {
+            is JSONObject -> data
+            is JSONArray -> (0 until data.length()).mapNotNull { data.optJSONObject(it) }
+                .firstOrNull { it.optString("marginCoin") == "USDT" }
+                ?: throw BitunixConnectionException("دریافت موجودی", "ACCOUNT_USDT_MISSING")
+            else -> throw BitunixConnectionException("دریافت موجودی", "ACCOUNT_SCHEMA")
+        }.also {
+            if (it.optString("marginCoin", "USDT") != "USDT") throw BitunixConnectionException("دریافت موجودی", "ACCOUNT_USDT_MISSING")
         }
-        BitunixSnapshot(account.getString("available"), account.getString("margin"), account.getString("frozen"),
-            account.getString("crossUnrealizedPNL"), account.getString("isolationUnrealizedPNL"), positions, System.currentTimeMillis())
+    }
+    suspend fun fetchAccount(credentials: BitunixCredentials): BitunixSnapshot = withContext(Dispatchers.IO) {
+        val account = accountFrom(get(credentials, "/api/v1/futures/account", "?marginCoin=USDT", "marginCoinUSDT"))
+        try {
+            BitunixSnapshot(account.getString("available"), account.getString("margin"), account.getString("frozen"),
+                account.getString("crossUnrealizedPNL"), account.getString("isolationUnrealizedPNL"), emptyList(), System.currentTimeMillis())
+                .also { if (listOf(it.available, it.margin, it.frozen, it.crossPnl, it.isolatedPnl).any { value -> value.toBigDecimalOrNull() == null }) throw BitunixConnectionException("دریافت موجودی", "ACCOUNT_SCHEMA") }
+        } catch (e: org.json.JSONException) { throw BitunixConnectionException("دریافت موجودی", "ACCOUNT_SCHEMA") }
+    }
+    suspend fun fetchPositions(credentials: BitunixCredentials): List<BitunixPosition> = withContext(Dispatchers.IO) {
+        val result = get(credentials, "/api/v1/futures/position/get_pending_positions", "?includeSubAccounts=false", "includeSubAccountsfalse")
+        try {
+            val data = result.getJSONArray("data")
+            (0 until data.length()).map { i ->
+                val p = data.getJSONObject(i)
+                BitunixPosition(p.getString("symbol"), p.getString("side"), p.getString("leverage"), p.getString("avgOpenPrice"), p.getString("margin"), p.getString("unrealizedPNL"), p.getString("positionId"), p.getString("qty"), p.getString("positionMode"))
+            }
+        } catch (e: org.json.JSONException) { throw BitunixConnectionException("دریافت پوزیشن‌ها", "POSITIONS_SCHEMA") }
+    }
+    suspend fun fetch(credentials: BitunixCredentials): BitunixSnapshot {
+        val account = fetchAccount(credentials)
+        return account.copy(positions = fetchPositions(credentials), fetchedAt = System.currentTimeMillis())
     }
 
     suspend fun history(c: BitunixCredentials): List<ExchangeHistory> = withContext(Dispatchers.IO) {
@@ -155,7 +194,7 @@ internal object BitunixClient {
             require(sl == null || if (draft.side == "BUY") sl < price else sl > price) { "جهت حد ضرر نادرست است" }
             require(tp == null || if (draft.side == "BUY") tp > price else tp < price) { "جهت حد سود نادرست است" }
         }
-        val account = get(c, "/api/v1/futures/account", "?marginCoin=USDT", "marginCoinUSDT").getJSONArray("data").getJSONObject(0)
+        val account = accountFrom(get(c, "/api/v1/futures/account", "?marginCoin=USDT", "marginCoinUSDT"))
         val mode = account.getString("positionMode")
         require(mode in setOf("ONE_WAY", "HEDGE")) { "حالت حساب ناشناخته است" }
         val settings = get(c, "/api/v1/futures/account/get_leverage_margin_mode", "?marginCoin=USDT&symbol=" + draft.symbol, "marginCoinUSDTsymbol" + draft.symbol).getJSONObject("data")
