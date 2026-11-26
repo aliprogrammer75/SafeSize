@@ -11,7 +11,6 @@ import android.content.pm.ServiceInfo
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
-import androidx.core.content.ContextCompat
 import com.example.MainActivity
 import com.example.R
 import kotlinx.coroutines.CancellationException
@@ -165,8 +164,9 @@ class MarketAlertService : Service() {
         internal fun startIfNeeded(context: Context): Boolean {
             if (WatchStore.activeRules(context).isEmpty() || !MarketMonitor.canNotify(context)) return false
             return try {
-                ContextCompat.startForegroundService(context, Intent(context, MarketAlertService::class.java))
-                true
+                // Only the visible UI starts monitoring. Promote in onStartCommand so a slow
+                // activity launch cannot time out while the service callback waits to run.
+                context.startService(Intent(context, MarketAlertService::class.java)) != null
             } catch (_: IllegalStateException) {
                 false
             } catch (_: SecurityException) {
