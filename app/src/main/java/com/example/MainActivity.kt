@@ -28,6 +28,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.ui.Modifier
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -81,16 +83,49 @@ fun MainScreen() {
 
     val currentEntry by navController.currentBackStackEntryAsState()
     val route = currentEntry?.destination?.route
-    fun go(destination: String) { navController.navigate(destination) { launchSingleTop = true } }
+    val home = "home-v2"
+    fun go(destination: String) {
+        val target = if (destination == "dashboard") home else destination
+        if (navController.currentDestination?.route != target) {
+            navController.navigate(target) { launchSingleTop = true }
+        }
+    }
+    fun selectTab(target: String) {
+        if (navController.currentDestination?.route == target) return
+        if (target == home) {
+            if (!navController.popBackStack(home, false)) {
+                navController.navigate(home) {
+                    popUpTo(navController.graph.id) { inclusive = true }
+                    launchSingleTop = true
+                }
+            }
+        } else {
+            navController.navigate(target) {
+                popUpTo(home) { inclusive = false; saveState = false }
+                launchSingleTop = true
+                restoreState = false
+            }
+        }
+    }
+    val section = when(route) {
+        home -> "داشبورد"
+        "exchange" -> "صرافی‌ها"
+        "calculator" -> "ماشین حساب"
+        "chart" -> "چارت"
+        "journal" -> "ژورنال"
+        "demo" -> "حساب تمرینی مستقل"
+        "trade-menu", "bitunix-trade" -> "معامله واقعی"
+        else -> "مدیریت ریسک و معاملات"
+    }
     Scaffold(
         topBar = {
             Surface(color = MaterialTheme.colorScheme.background) {
                 Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 20.dp, vertical = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Column {
                         Text(if (route == "demo") "SafeSize • DEMO" else "SafeSize", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                        Text(if (route == "demo") "حساب تمرینی مستقل" else "مدیریت ریسک و معاملات", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(section, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    if (route != "dashboard") TextButton(onClick = { if (!navController.popBackStack()) go("dashboard") }) { Text("بازگشت") }
+                    if (route != home) TextButton(onClick = { if (!navController.popBackStack()) selectTab(home) }) { Text("بازگشت") }
                     else TextButton(onClick = { go("exchange") }) { Text("حساب‌ها") }
                 }
             }
@@ -101,7 +136,7 @@ fun MainScreen() {
                 val currentDestination = navBackStackEntry?.destination
                 
                 val items = listOf(
-                    Triple("dashboard", "داشبورد", Icons.Filled.Home),
+                    Triple(home, "داشبورد", Icons.Filled.Home),
                     Triple("chart", "چارت", Icons.Filled.Info),
                     Triple("calculator", "ماشین حساب", Icons.Filled.Add),
                     Triple("journal", "ژورنال", Icons.Filled.List),
@@ -114,15 +149,7 @@ fun MainScreen() {
                         label = { Text(label, style = MaterialTheme.typography.labelSmall) },
                         colors = NavigationBarItemDefaults.colors(indicatorColor = MaterialTheme.colorScheme.primaryContainer, selectedIconColor = MaterialTheme.colorScheme.primary, selectedTextColor = MaterialTheme.colorScheme.primary),
                         selected = currentDestination?.hierarchy?.any { it.route == route } == true,
-                        onClick = {
-                            navController.navigate(route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
-                                }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        }
+                        onClick = { selectTab(route) }
                     )
                 }
             }
@@ -130,10 +157,10 @@ fun MainScreen() {
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = "dashboard",
-            modifier = Modifier.padding(innerPadding)
+            startDestination = home,
+            modifier = Modifier.fillMaxSize().padding(innerPadding)
         ) {
-            composable("dashboard") { HomeScreen(viewModel, onNavigate = { go(it) }) }
+            composable(home) { HomeScreen(viewModel, onNavigate = { go(it) }) }
             composable("manual-dashboard") { DashboardScreen(viewModel) }
             composable("chart") { ChartHomeScreen() }
             composable("demo") { DemoTradingScreen() }

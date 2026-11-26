@@ -227,7 +227,23 @@ function olderRequest(cb){
  if(pendingOlder||!more)return false;const data=chart.getDataList();if(!data.length)return false;
  pendingOlder=true;pendingCallback=cb||null;ChartNative.older(String(data[0].timestamp));say('در حال دریافت تاریخچه قدیمی‌تر…');return true
 }
+function fitChart(){
+ const root=document.documentElement,body=document.body,toolbar=$('toolbar'),wrap=$('chartwrap');
+ const h=Math.max(0,window.innerHeight||root.clientHeight),w=Math.max(0,window.innerWidth||root.clientWidth);
+ if(!h||!w)return;
+ body.style.height=h+'px';body.style.width=w+'px';
+ const top=Math.ceil(toolbar.getBoundingClientRect().height);
+ const available=Math.max(1,h-top);
+ wrap.style.top=top+'px';wrap.style.height=available+'px';wrap.style.bottom='auto';
+ $('chart').style.height=available+'px';$('chart').style.width=w+'px';
+ if(chart)chart.resize()
+}
+let fitFrame=0;
+function scheduleFit(){if(fitFrame)return;fitFrame=requestAnimationFrame(()=>{fitFrame=0;fitChart()})}
+window.addEventListener('resize',scheduleFit);
+window.visualViewport?.addEventListener('resize',scheduleFit);
 window.SafeChart={
+ fit:fitChart,
  init(key,precision){
   if(chart)return;series=key;registerCustom();chart=klinecharts.init('chart',{styles:'dark',timezone:'Etc/UTC',locale:'en-US'});
   if(!chart){say('موتور نمودار آماده نشد');return}
@@ -236,9 +252,9 @@ window.SafeChart={
   for(const v of read('indicators',[{name:'VOL',params:[]}]))if(indicatorNames.includes(v.name))try{indicator(v.name,v.params||[],v)}catch(_){}
   currentStyle=read('chartStyle','candle_solid');chart.setStyles({candle:{type:currentStyle}});
   chart.setLoadDataCallback(({type,data,callback})=>{if(data && data.timestamp===chart.getDataList()[0]?.timestamp){if(!olderRequest(callback))callback([],more)}else callback([],false)});
-  new ResizeObserver(()=>chart.resize()).observe($('chart'));say('آماده دریافت داده بیت‌یونیکس')
+  new ResizeObserver(scheduleFit).observe($('toolbar'));fitChart();setTimeout(fitChart,100);setTimeout(fitChart,500);say('آماده دریافت داده بیت‌یونیکس')
  },
- reset(data){if(!chart||!data.length)return;more=data.length===200;chart.applyNewData(data,more);initialized=true;for(const o of read('draw:'+series,[]))if(overlayTools.some(x=>x[0]===o.name)&&o.points?.length)try{createDrawing(o.name,o.points,o.pane||'main',o.config||{},!!o.lock,o.visible!==false)}catch(_){}updateLevels();say('تاریخچه بارگذاری شد')},
+ reset(data){if(!chart||!data.length)return;more=data.length===200;chart.applyNewData(data,more);initialized=true;for(const o of read('draw:'+series,[]))if(overlayTools.some(x=>x[0]===o.name)&&o.points?.length)try{createDrawing(o.name,o.points,o.pane||'main',o.config||{},!!o.lock,o.visible!==false)}catch(_){}updateLevels();fitChart();say('تاریخچه بارگذاری شد')},
  sync(data){if(!chart||!data.length)return;const prev=chart.getDataList();if(!prev.length){this.reset(data);return}const last=prev[prev.length-1].timestamp;const map=new Map(prev.map(x=>[x.timestamp,x]));for(const b of data)map.set(b.timestamp,b);const all=[...map.values()].sort((a,b)=>a.timestamp-b.timestamp);
   const earlier=data.some(b=>{const old=prev.find(p=>p.timestamp===b.timestamp);return b.timestamp<last&&(!old||['open','high','low','close','volume'].some(k=>old[k]!==b[k]))});if(earlier){const visible=chart.getVisibleRange(),anchor=prev[Math.min(prev.length-1,Math.max(0,visible?.to||0))]?.timestamp;chart.applyNewData(all,more);if(anchor&&visible.to<prev.length-3)chart.scrollToTimestamp(anchor)}else for(const b of data)if(b.timestamp>=last)chart.updateData(b);
  },

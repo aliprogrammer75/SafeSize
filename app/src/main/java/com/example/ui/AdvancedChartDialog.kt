@@ -12,6 +12,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
@@ -40,24 +43,27 @@ private class ChartBridge(private val ready:()->Unit,private val older:(Long)->U
 fun AdvancedChartDialog(symbol:String, initialInterval:String, precision:Int, entry:String, stop:String, target:String, onDismiss:()->Unit,onSelect:(String,String)->Unit){
     var interval by remember{mutableStateOf(initialInterval)}
     var type by remember{mutableStateOf("LAST_PRICE")}
+    var compact by remember{mutableStateOf(false)}
     Dialog(onDismissRequest=onDismiss,properties=DialogProperties(usePlatformDefaultWidth=false,decorFitsSystemWindows=true)){
         Surface(Modifier.fillMaxSize(),color=MaterialTheme.colorScheme.background){
-            Column(Modifier.fillMaxSize().padding(8.dp)){
+            Column(Modifier.fillMaxSize().padding(horizontal=4.dp,vertical=2.dp)){
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
-                    Text(symbol+" • Bitunix",style=MaterialTheme.typography.titleLarge,modifier=Modifier.padding(top=10.dp))
-                    TextButton(onClick=onDismiss){Text("بازگشت")}
+                    Text(symbol+" • Bitunix",style=MaterialTheme.typography.titleMedium,modifier=Modifier.padding(top=12.dp))
+                    Row { TextButton(onClick={compact=!compact}){Text(if(compact)"تنظیمات" else "گسترش")}; TextButton(onClick=onDismiss){Text("بازگشت")} }
                 }
-                Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(6.dp)){
-                    MarketData.intervals.forEach{t->FilterChip(t==interval,{interval=t},{Text(t)})}
-                }
-                Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){
-                    FilterChip(type=="LAST_PRICE",{type="LAST_PRICE"},{Text("Last Price")})
-                    FilterChip(type=="MARK_PRICE",{type="MARK_PRICE"},{Text("Mark Price")})
+                if (!compact) {
+                    Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(4.dp)){
+                        MarketData.intervals.forEach{t->FilterChip(t==interval,{interval=t},{Text(t)})}
+                    }
+                    Row(horizontalArrangement=Arrangement.spacedBy(4.dp)){
+                        FilterChip(type=="LAST_PRICE",{type="LAST_PRICE"},{Text("Last Price")})
+                        FilterChip(type=="MARK_PRICE",{type="MARK_PRICE"},{Text("Mark Price")})
+                    }
                 }
                 key(symbol,interval,type){
                     AdvancedChart(symbol,interval,type,precision,entry,stop,target,onSelect,Modifier.weight(1f).fillMaxWidth())
                 }
-                Text("تحلیل مستقل؛ انتخاب سطح فقط ماشین حساب را به‌روز می‌کند و معامله ارسال نمی‌کند.",style=MaterialTheme.typography.labelSmall)
+
             }
         }
     }
@@ -134,11 +140,17 @@ fun AdvancedChartDialog(symbol:String, initialInterval:String, precision:Int, en
     }
     Column(modifier){
         Text(status,style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-        AndroidView(modifier=Modifier.weight(1f).fillMaxWidth(),factory={context->
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+        val h = maxHeight
+        AndroidView(modifier=Modifier.fillMaxSize(),factory={context->
             val loader=WebViewAssetLoader.Builder().addPathHandler("/assets/",WebViewAssetLoader.AssetsPathHandler(context)).build()
             WebView(context).apply{
                 web=this
                 setBackgroundColor(android.graphics.Color.rgb(11,16,24))
+                layoutParams=android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT,android.view.ViewGroup.LayoutParams.MATCH_PARENT)
+                settings.useWideViewPort=true
+                settings.loadWithOverviewMode=false
+                settings.textZoom=100
                 settings.javaScriptEnabled=true
                 settings.domStorageEnabled=true
                 settings.allowFileAccess=false
@@ -163,8 +175,16 @@ fun AdvancedChartDialog(symbol:String, initialInterval:String, precision:Int, en
                             loader.shouldInterceptRequest(request.url) ?: WebResourceResponse("text/plain","utf-8",ByteArrayInputStream(ByteArray(0)))
                         else WebResourceResponse("text/plain","utf-8",ByteArrayInputStream(ByteArray(0)))
                 }
+                addOnLayoutChangeListener { v,_,_,_,_,_,_,_,_ ->
+                    val wv=v as WebView
+                    wv.post { wv.evaluateJavascript("window.SafeChart && window.SafeChart.fit()",null) }
+                }
                 loadUrl(chartUrl)
             }
+        },update={ v ->
+            v.post { v.evaluateJavascript("window.SafeChart && window.SafeChart.fit()",null) }
         })
+        LaunchedEffect(h, ready) { if(ready) { delay(100); js("window.SafeChart.fit()") } }
+        }
     }
 }

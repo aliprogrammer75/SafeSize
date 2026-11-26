@@ -5,6 +5,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.List
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -36,7 +41,9 @@ fun HomeScreen(viewModel: TradeViewModel,onNavigate:(String)->Unit){
         }catch(e:CancellationException){throw e}catch(_:Exception){state="دریافت حساب ناموفق؛ اتصال را بررسی کنید"}
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),verticalArrangement=Arrangement.spacedBy(14.dp)){
-        Text("مرکز معاملات",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.Bold)
+        Text("داشبورد معاملات",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.Bold)
+        Text("تحلیل بازار، معاملات و عملکرد شما",style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
+        Button(onClick={onNavigate("chart")},modifier=Modifier.fillMaxWidth().heightIn(min=64.dp)){Icon(Icons.Default.Info,contentDescription=null);Spacer(Modifier.width(8.dp));Text("باز کردن چارت زنده",style=MaterialTheme.typography.titleMedium)}
         Card(colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.primaryContainer)){
             Column(Modifier.fillMaxWidth().padding(18.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
                 Text("REAL • Bitunix",style=MaterialTheme.typography.labelLarge,fontWeight=FontWeight.Bold)
@@ -45,7 +52,6 @@ fun HomeScreen(viewModel: TradeViewModel,onNavigate:(String)->Unit){
                 Row{TextButton(onClick={reload++}){Text("به‌روزرسانی")};TextButton(onClick={onNavigate("exchange")}){Text("مدیریت اتصال")}}
             }
         }
-        Button(onClick={onNavigate("chart")},modifier=Modifier.fillMaxWidth().heightIn(min=58.dp)){Text("چارت حرفه‌ای بیت‌یونیکس",style=MaterialTheme.typography.titleMedium)}
         Row(horizontalArrangement=Arrangement.spacedBy(10.dp)){
             Card(modifier=Modifier.weight(1f),onClick={onNavigate("trade-menu")},colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surfaceVariant)){
                 Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){Text("REAL",color=MaterialTheme.colorScheme.error,fontWeight=FontWeight.Bold);Text("معامله واقعی",style=MaterialTheme.typography.titleMedium);Text("محاسبه ریسک یا ثبت مستقیم",style=MaterialTheme.typography.bodySmall)}
