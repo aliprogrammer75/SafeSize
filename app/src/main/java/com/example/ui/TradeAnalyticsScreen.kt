@@ -56,7 +56,8 @@ fun TradeAnalyticsScreen(viewModel: TradeViewModel) {
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
-        Text("تحلیل‌ها و بینش‌ها", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text("تحلیل عملکرد ژورنال", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text("بر اساس معاملات ثبت‌شده دستی", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
         // Filters
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -143,7 +144,7 @@ fun TradeAnalyticsScreen(viewModel: TradeViewModel) {
                     Spacer(Modifier.height(8.dp))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(bestPair.key, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                        Text("+$${String.format("%.2f", bestPair.value)}", style = MaterialTheme.typography.headlineSmall, color = Color(0xFF4CAF50))
+                        Text("+$${String.format("%.2f", bestPair.value)}", style = MaterialTheme.typography.headlineSmall, color = Color(0xFF2DD4BF))
                     }
                     val pairTrades = filteredTrades.filter { it.symbol == bestPair.key }
                     val pairWins = pairTrades.count { (it.pnl ?: 0.0) > 0 }
@@ -172,14 +173,14 @@ fun TradeAnalyticsScreen(viewModel: TradeViewModel) {
         if (topWinReasons.isNotEmpty()) {
             Text("عوامل موفقیت (پرتکرار)", style = MaterialTheme.typography.titleMedium)
             topWinReasons.forEach { (reason, count) ->
-                ReasonProgressBar(reason, count, wins.size, Color(0xFF4CAF50))
+                ReasonProgressBar(reason, count, wins.size, Color(0xFF2DD4BF))
             }
         }
 
         if (topLossReasons.isNotEmpty()) {
             Text("عوامل شکست (پرتکرار)", style = MaterialTheme.typography.titleMedium)
             topLossReasons.forEach { (reason, count) ->
-                ReasonProgressBar(reason, count, losses.size, Color(0xFFF44336))
+                ReasonProgressBar(reason, count, losses.size, Color(0xFFFB7185))
             }
         }
     }
@@ -238,7 +239,7 @@ fun PnLChart(trades: List<Trade>, onClick: () -> Unit) {
     val range = maxVal - minVal
     val adjustedRange = if (range == 0.0) 100.0 else range
 
-    val lineColor = if (currentSum >= 0) Color(0xFF4CAF50) else Color(0xFFF44336)
+    val lineColor = if (currentSum >= 0) Color(0xFF2DD4BF) else Color(0xFFFB7185)
     val gradientColors = listOf(lineColor.copy(alpha = 0.5f), Color.Transparent)
 
     Canvas(modifier = Modifier
@@ -343,8 +344,8 @@ fun CalendarDialog(trades: List<Trade>, onDismiss: () -> Unit) {
                 items(last30Days) { dateStr ->
                     val pnl = dailyPnlMap[dateStr] ?: 0.0
                     val boxColor = when {
-                        pnl > 0 -> Color(0xFF4CAF50).copy(alpha = 0.8f) // Green
-                        pnl < 0 -> Color(0xFFF44336).copy(alpha = 0.8f) // Red
+                        pnl > 0 -> Color(0xFF2DD4BF).copy(alpha = 0.8f) // Green
+                        pnl < 0 -> Color(0xFFFB7185).copy(alpha = 0.8f) // Red
                         else -> MaterialTheme.colorScheme.surfaceVariant // Gray/Neutral
                     }
                     

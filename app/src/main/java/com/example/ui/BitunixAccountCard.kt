@@ -1,0 +1,194 @@
+package com.example.ui
+
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
+import com.example.data.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.text.DateFormat
+import java.util.Date
+
+@Composable
+fun BitunixAccountCard() {
+    val context = LocalContext.current.applicationContext
+    val vault = remember(context) { BitunixVault(context) }
+    val scope = rememberCoroutineScope()
+    var snapshot by remember { mutableStateOf<BitunixSnapshot?>(null) }
+    var configured by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var edit by remember { mutableStateOf(false) }
+    var confirmDisconnect by remember { mutableStateOf(false) }
+    fun failure(e: Exception): String = when (e) {
+        is BitunixApiException -> "خطای اتصال صرافی (" + e.code + ")؛ مجوز خواندن، کلید، IP و ساعت دستگاه را بررسی کنید."
+        else -> "دریافت اطلاعات یا دسترسی به کلید ذخیره‌شده ممکن نبود. اینترنت و تنظیمات اتصال را بررسی کنید."
+    }
+    suspend fun refresh(newCredentials: BitunixCredentials? = null) {
+        if (busy) return
+        busy = true
+        error = null
+        try {
+            val credentials = newCredentials ?: withContext(Dispatchers.IO) { vault.load() }
+            if (credentials != null) {
+                if (newCredentials == null) configured = true
+                val fresh = BitunixClient.fetch(credentials)
+                if (newCredentials != null) withContext(Dispatchers.IO) { vault.save(credentials) }
+                configured = true
+                snapshot = fresh
+                edit = false
+            } else {
+                configured = false
+                snapshot = null
+            }
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { error = failure(e) }
+        finally { busy = false }
+    }
+    LaunchedEffect(Unit) { refresh() }
+
+    OutlinedCard(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+    ) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("حساب فیوچرز Bitunix", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(
+                        when { busy -> "در حال همگام‌سازی"; error != null -> "همگام‌سازی ناموفق"; snapshot != null -> "آخرین دریافت موفق"; else -> "اتصال فقط خواندنی" },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = when { error != null -> MaterialTheme.colorScheme.error; snapshot != null -> MaterialTheme.colorScheme.tertiary; else -> MaterialTheme.colorScheme.onSurfaceVariant }
+                    )
+                }
+                if (configured) IconButton(enabled = !busy, onClick = { scope.launch { refresh() } }) {
+                    Icon(Icons.Default.Refresh, contentDescription = "به‌روزرسانی")
+                }
+            }
+            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+            snapshot?.let { s ->
+                Text("موجودی آزاد (USDT)", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelLarge)
+                LtrAmount(s.available, MaterialTheme.colorScheme.onSurface, true)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    ExchangeMetric("مارجین پوزیشن", s.margin, Modifier.weight(1f))
+                    ExchangeMetric("مسدودی سفارش", s.frozen, Modifier.weight(1f))
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    ExchangeMetric("سود/زیان Cross", s.crossPnl, Modifier.weight(1f), true)
+                    ExchangeMetric("سود/زیان Isolated", s.isolatedPnl, Modifier.weight(1f), true)
+                }
+                Text("آخرین دریافت: " + DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(s.fetchedAt)),
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                HorizontalDivider()
+                Text("پوزیشن‌های باز صرافی", fontWeight = FontWeight.SemiBold)
+                if (s.positions.isEmpty()) Text("پوزیشن بازی دریافت نشد.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                s.positions.forEach { p ->
+                    Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant) {
+                        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text(p.symbol, fontWeight = FontWeight.Bold)
+                                Text(p.side + " · " + p.leverage + "x", color = if (p.side == "LONG") MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error)
+                            }
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("سود/زیان باز", style = MaterialTheme.typography.bodySmall)
+                                LtrAmount(p.pnl, pnlColor(p.pnl))
+                            }
+                            Text("ورود: " + p.entry + " | مارجین: " + p.margin, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+            if (!configured && snapshot == null) {
+                Text("موجودی و پوزیشن‌های واقعی را بدون مجوز ثبت سفارش مشاهده کنید.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Button(onClick = { edit = true }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("اتصال حساب بیت‌یونیکس") }
+                if (error != null) TextButton(onClick = { confirmDisconnect = true }, enabled = !busy) { Text("پاک کردن کلید ذخیره‌شده") }
+            } else {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    TextButton(onClick = { edit = true }, enabled = !busy) { Text("تغییر کلید") }
+                    TextButton(onClick = { confirmDisconnect = true }, enabled = !busy) { Text("قطع اتصال") }
+                }
+            }
+            Text("اطلاعات صرافی از ژورنال دستی جداست؛ قیمت‌ها پس از به‌روزرسانی تغییر می‌کنند.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+        }
+    }
+    if (edit) {
+        var apiKey by remember { mutableStateOf("") }
+        var secret by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { if (!busy) edit = false },
+            title = { Text("اتصال امن به Bitunix") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("در صرافی کلید فقط خواندنی بسازید. مجوز معامله و برداشت را فعال نکنید.")
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                        OutlinedTextField(apiKey, { apiKey = it }, label = { Text("API Key") }, singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(), enabled = !busy, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
+                        OutlinedTextField(secret, { secret = it }, label = { Text("Secret Key") }, singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(), enabled = !busy, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
+                    }
+                    error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                }
+            },
+            confirmButton = { Button(enabled = !busy && apiKey.isNotBlank() && secret.isNotBlank(), onClick = {
+                val credentials = BitunixCredentials(apiKey.trim(), secret.trim())
+                scope.launch { refresh(credentials) }
+            }) { Text(if (busy) "در حال بررسی" else "آزمایش و ذخیره") } },
+            dismissButton = { TextButton(enabled = !busy, onClick = { edit = false }) { Text("لغو") } }
+        )
+    }
+    if (confirmDisconnect) AlertDialog(
+        onDismissRequest = { confirmDisconnect = false },
+        title = { Text("قطع اتصال صرافی") },
+        text = { Text("کلید ذخیره‌شده روی این دستگاه حذف می‌شود. این کار روی حساب صرافی یا ژورنال دستی اثری ندارد.") },
+        confirmButton = { TextButton(onClick = {
+            confirmDisconnect = false
+            scope.launch {
+                busy = true
+                try { withContext(Dispatchers.IO) { vault.clear() }; configured = false; snapshot = null; error = null }
+                catch (e: CancellationException) { throw e }
+                catch (e: Exception) { error = failure(e) }
+                finally { busy = false }
+            }
+        }) { Text("قطع اتصال") } },
+        dismissButton = { TextButton(onClick = { confirmDisconnect = false }) { Text("لغو") } }
+    )
+}
+
+@Composable private fun pnlColor(value: String) = when {
+    (value.toBigDecimalOrNull()?.signum() ?: 0) > 0 -> MaterialTheme.colorScheme.tertiary
+    (value.toBigDecimalOrNull()?.signum() ?: 0) < 0 -> MaterialTheme.colorScheme.error
+    else -> MaterialTheme.colorScheme.onSurface
+}
+
+@Composable private fun LtrAmount(value: String, color: androidx.compose.ui.graphics.Color, large: Boolean = false) {
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        Text(value.toBigDecimalOrNull()?.stripTrailingZeros()?.toPlainString() ?: "—", color = color,
+            style = if (large) MaterialTheme.typography.displaySmall else MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable private fun ExchangeMetric(label: String, value: String, modifier: Modifier, pnl: Boolean = false) {
+    Surface(modifier = modifier, shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            LtrAmount(value, if (pnl) pnlColor(value) else MaterialTheme.colorScheme.onSurface)
+        }
+    }
+}

@@ -36,6 +36,7 @@ fun TradeJournalScreen(viewModel: TradeViewModel) {
     var tradeToClose by remember { mutableStateOf<Trade?>(null) }
 
         Column(modifier = Modifier.fillMaxSize()) {
+        Text("ژورنال معاملات دستی", modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         TabRow(selectedTabIndex = selectedTabIndex) {
             Tab(selected = selectedTabIndex == 0, onClick = { selectedTabIndex = 0 }, text = { Text("پوزیشن‌های در جریان") })
             Tab(selected = selectedTabIndex == 1, onClick = { selectedTabIndex = 1 }, text = { Text("تاریخچه معاملات") })
@@ -124,7 +125,7 @@ fun TradeCard(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.dp, cardBorderColor.copy(alpha = 0.5f)),
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

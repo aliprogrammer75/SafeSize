@@ -36,12 +36,15 @@ fun DashboardScreen(viewModel: TradeViewModel) {
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        BitunixAccountCard()
+
+        Text("سرمایه و ژورنال دستی", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         // 1. Header (Account Summary)
         OutlinedCard(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp)
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
                 Row(
@@ -49,14 +52,14 @@ fun DashboardScreen(viewModel: TradeViewModel) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("کل دارایی (EQUITY)", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("سرمایه ثبت‌شده دستی", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     IconButton(onClick = { showEditBalanceDialog = true }, modifier = Modifier.size(24.dp)) {
                         Icon(imageVector = androidx.compose.material.icons.Icons.Default.Edit, contentDescription = "Edit Balance", tint = MaterialTheme.colorScheme.primary)
                     }
                 }
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "$${String.format("%,.0f", totalEquity)}",
+                    text = "$${String.format(java.util.Locale.US, "%,.2f", totalEquity)}",
                     style = MaterialTheme.typography.displayMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
@@ -66,22 +69,15 @@ fun DashboardScreen(viewModel: TradeViewModel) {
                     Column {
                         Text("مارجین درگیر (Locked)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.height(4.dp))
-                        Text("$${String.format("%,.0f", usedMargin)}", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                        Text("$${String.format(java.util.Locale.US, "%,.2f", usedMargin)}", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
                     }
                     Column(horizontalAlignment = Alignment.End) {
                         Text("مارجین آزاد (Available)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.height(4.dp))
-                        Text("$${String.format("%,.0f", freeMargin)}", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.tertiary)
+                        Text("$${String.format(java.util.Locale.US, "%,.2f", freeMargin)}", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.tertiary)
                     }
                 }
-                Spacer(Modifier.height(16.dp))
-                Button(
-                    onClick = { showResetDialog = true },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("ریست کلی برنامه (حذف تمام داده‌ها)")
-                }
+
             }
         }
 
@@ -96,7 +92,7 @@ fun DashboardScreen(viewModel: TradeViewModel) {
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.outlinedCardColors(containerColor = Color(0x19F57F17)), // Subtle yellow fill
                 border = BorderStroke(1.dp, Color(0x40F57F17)),
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp)
             ) {
                 Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("⚠️", style = MaterialTheme.typography.headlineMedium)
@@ -128,7 +124,7 @@ fun DashboardScreen(viewModel: TradeViewModel) {
                 modifier = Modifier.weight(1f),
                 colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp)
             ) {
                 Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("سود خالص", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -145,7 +141,7 @@ fun DashboardScreen(viewModel: TradeViewModel) {
                 modifier = Modifier.weight(1f),
                 colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp)
             ) {
                 Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("فاکتور سود", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -157,7 +153,7 @@ fun DashboardScreen(viewModel: TradeViewModel) {
                 modifier = Modifier.weight(1f),
                 colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp)
             ) {
                 Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("نرخ برد", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -182,6 +178,7 @@ fun DashboardScreen(viewModel: TradeViewModel) {
                 )
             }
         }
+        TextButton(onClick = { showResetDialog = true }) { Text("مدیریت داده‌های دستی / حذف همه", color = MaterialTheme.colorScheme.error) }
     }
 
     tradeToClose?.let { trade ->

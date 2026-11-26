@@ -58,7 +58,8 @@ fun TradeCalculatorScreen(viewModel: TradeViewModel) {
             .padding(16.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        Text("ماشین حساب ریسک", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text("محاسبه ریسک معامله", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text("بر اساس سرمایه ثبت‌شده در ژورنال دستی", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
             Text("مارجین آزاد:")
@@ -138,7 +139,7 @@ fun TradeCalculatorScreen(viewModel: TradeViewModel) {
                     selectedRiskPercent = 1
                     showConfirmDialog = true
                 }
-                RiskBox(2, "متعادل", Color(0xFFA78BFA), freeMargin, stopLossPercent, entrySteps) {
+                RiskBox(2, "متعادل", MaterialTheme.colorScheme.primary, freeMargin, stopLossPercent, entrySteps) {
                     selectedRiskPercent = 2
                     showConfirmDialog = true
                 }
@@ -190,7 +191,7 @@ fun RiskBox(
             .clickable(onClick = onClick),
         colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.dp, accentColor),
-        shape = RoundedCornerShape(8.dp)
+        shape = RoundedCornerShape(18.dp)
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
