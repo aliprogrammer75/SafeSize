@@ -42,7 +42,7 @@ function alertMenu(initial, chosenDelivery='local'){
   const hint=document.createElement('p');
   const explain=()=>{hint.textContent=delivery?.value==='sms'
    ? 'سرور قیمت را حتی پس از بستن برنامه بررسی می‌کند.'
-   : 'بررسی اعلان گوشی در پس‌زمینه دوره‌ای است.';};
+   : 'پس از ثبت، اعلان «رصد قیمت SafeSize» وضعیت بررسی در پس‌زمینه را نشان می‌دهد.';};
   if(delivery)delivery.onchange=explain;
   explain();panel.append(hint);
  },'هشدار قیمت · '+marketSymbol);

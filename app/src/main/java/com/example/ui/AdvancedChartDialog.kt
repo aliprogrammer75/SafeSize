@@ -200,9 +200,13 @@ internal fun AdvancedChartDialog(
             alertResult("هشدار ذخیره نشد. حداکثر ۳۰ هشدار در رصد بازار نگه‌داری می‌شود")
             return
         }
-        WatchStore.setEnabled(context, true)
+        val trackingStarted = WatchStore.setEnabled(context, true)
         alertRevision++
-        alertResult("هشدار قیمت ثبت شد")
+        alertResult(when {
+            trackingStarted -> "هشدار ثبت شد؛ رصد قیمت در پس‌زمینه شروع می‌شود"
+            !MarketMonitor.canNotify(context) -> "هشدار ذخیره شد؛ اعلان‌های SafeSize را در تنظیمات گوشی فعال کنید"
+            else -> "هشدار ذخیره شد؛ بررسی دوره‌ای فعال است"
+        })
     }
     val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         val rule = pendingPermissionRule

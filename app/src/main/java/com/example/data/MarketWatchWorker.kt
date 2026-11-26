@@ -6,12 +6,17 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.work.*
 import com.example.MainActivity
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
@@ -28,6 +33,8 @@ internal data class WatchRule(
     val interval:String, val strategy:String, val checklist:List<String>, val checked:List<Int> = emptyList(),
     val active:Boolean=true, val hitAt:Long=0, val lastPrice:String="", val checkedAt:Long=0, val priceType:String="LAST_PRICE"
 )
+internal fun WatchRule.isLivePriceRule() = type in setOf("ABOVE", "BELOW", "ZONE")
+
 internal object WatchStore {
     private val lock=Any()
     private fun prefs(c:Context)=c.getSharedPreferences("market_watch_v1",0)
@@ -39,10 +46,23 @@ internal object WatchStore {
         current.size<30 && edit(c){it+rule}
     }
     fun enabled(c:Context)=prefs(c).getBoolean("enabled",false)
+    fun activeRules(c: Context): List<WatchRule> =
+        if (enabled(c)) read(c).filter { it.active } else emptyList()
+
+    fun ruleChanges(c: Context) = callbackFlow {
+        val prefs = prefs(c)
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == "rules" || key == "enabled" || key == null) trySend(activeRules(c))
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        trySend(activeRules(c))
+        awaitClose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }.buffer(Channel.CONFLATED)
+
     fun enabledSince(c:Context)=prefs(c).getLong("since",0)
     fun status(c:Context)=prefs(c).getString("status","هنوز بررسی نشده")?:""
     fun status(c:Context,s:String){prefs(c).edit().putString("status",s).apply()}
-    fun setEnabled(c:Context,on:Boolean){
+    fun setEnabled(c:Context,on:Boolean):Boolean{
         val p=prefs(c)
         if(on && !p.getBoolean("enabled",false))p.edit().putLong("since",System.currentTimeMillis()).apply()
         p.edit().putBoolean("enabled",on).apply()
@@ -50,8 +70,14 @@ internal object WatchStore {
         if(on){
             wm.enqueueUniquePeriodicWork("market_watch_periodic",ExistingPeriodicWorkPolicy.UPDATE,
                 PeriodicWorkRequestBuilder<MarketWatchWorker>(15,TimeUnit.MINUTES).setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build())
+            val started = MarketAlertService.startIfNeeded(c)
             checkNow(c)
-        }else{wm.cancelUniqueWork("market_watch_periodic");wm.cancelUniqueWork("market_watch_now")}
+            return started
+        }
+        MarketAlertService.stop(c)
+        wm.cancelUniqueWork("market_watch_periodic")
+        wm.cancelUniqueWork("market_watch_now")
+        return false
     }
     fun checkNow(c:Context){
         WorkManager.getInstance(c).enqueueUniqueWork("market_watch_now",ExistingWorkPolicy.KEEP,
@@ -61,15 +87,26 @@ internal object WatchStore {
     fun markTrigger(c:Context,key:String){prefs(c).edit().putBoolean("trigger_"+key,true).apply()}
 }
 internal object MarketMonitor {
-    private val mutex=Mutex()
+    private const val alertChannel = "market_watch"
+    private val priceMutex = Mutex()
+    private val tradeMutex = Mutex()
+
+    fun canNotify(c: Context): Boolean {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            c.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return false
+        val manager = c.getSystemService(NotificationManager::class.java)
+        if (!manager.areNotificationsEnabled()) return false
+        val channel = manager.getNotificationChannel(alertChannel)
+        if (channel != null) return channel.importance != NotificationManager.IMPORTANCE_NONE
+        manager.createNotificationChannel(NotificationChannel(alertChannel, "هشدار معاملات و بازار", NotificationManager.IMPORTANCE_HIGH))
+        return true
+    }
+
     private fun notify(c:Context,id:String,title:String,text:String):Boolean {
-        if(Build.VERSION.SDK_INT>=33 && c.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)return false
+        if (!canNotify(c)) return false
         val nm=c.getSystemService(NotificationManager::class.java)
-        if(!nm.areNotificationsEnabled())return false
-        nm.createNotificationChannel(NotificationChannel("market_watch","هشدار معاملات و بازار",NotificationManager.IMPORTANCE_HIGH))
-        if(nm.getNotificationChannel("market_watch").importance==NotificationManager.IMPORTANCE_NONE)return false
         val intent=PendingIntent.getActivity(c,0,Intent(c,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP),PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        nm.notify(id.hashCode(),NotificationCompat.Builder(c,"market_watch").setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle(title).setContentText(text)
+        nm.notify(alertChannel,id.hashCode(),NotificationCompat.Builder(c,alertChannel).setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle(title).setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text)).setContentIntent(intent).setAutoCancel(true).build())
         return true
     }
@@ -104,30 +141,69 @@ internal object MarketMonitor {
     fun observeChartPrice(c:Context,symbol:String,priceType:String,price:BigDecimal) {
         if(!WatchStore.enabled(c))return
         WatchStore.read(c).filter {
-            it.active && it.symbol==symbol && it.priceType==priceType && it.type in setOf("ABOVE","BELOW","ZONE")
+            it.active && it.symbol==symbol && it.priceType==priceType && it.isLivePriceRule()
         }.filter{meets(it,price)}.forEach{deliverPrice(c,it,price,true)}
     }
 
     private fun hash(s:String)=MessageDigest.getInstance("SHA-256").digest(s.toByteArray()).joinToString(""){"%02x".format(it.toInt() and 255)}
-    suspend fun check(c:Context):Boolean=mutex.withLock {
-        if(!WatchStore.enabled(c))return@withLock true
-        val rules=WatchStore.read(c).filter{it.active}.take(30)
-        var failed=false
-        var hits=0
-        val quotes=if(rules.isEmpty())emptyMap() else try{MarketData.quotes(rules.map{it.symbol}.distinct())}catch(e:CancellationException){throw e}catch(_:Exception){failed=true;emptyMap()}
-        for(r in rules){
-            try{
-                if(!WatchStore.enabled(c))break
-                val ticker=quotes[r.symbol]?:continue
-                val price=if(r.type=="CLOSE_ABOVE" || r.type=="CLOSE_BELOW") {
-                    val bar=MarketData.candles(r.symbol,r.interval,r.priceType).lastOrNull()?:error("No candle")
-                    BigDecimal.valueOf(bar.close)
-                } else if (r.priceType=="MARK_PRICE") ticker.mark else ticker.last
-                if(deliverPrice(c,r,price,meets(r,price))) hits++
-                // Stay within public API rate limits when checking many candle rules.
-                delay(150)
-            }catch(e:CancellationException){throw e}catch(_:Exception){failed=true}
+    private data class CheckResult(val failed: Boolean, val hits: Int)
+
+    private suspend fun readPrices(c: Context): CheckResult = priceMutex.withLock {
+        val rules = WatchStore.activeRules(c).take(30)
+        val symbols = rules.filter { it.isLivePriceRule() }.map { it.symbol }.distinct()
+        var failed = false
+        var hits = 0
+        val quotes = if (symbols.isEmpty()) emptyMap() else try {
+            MarketData.quotes(symbols)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            failed = true
+            emptyMap()
         }
+        for (rule in rules) {
+            if (!WatchStore.enabled(c)) break
+            try {
+                val price = if (rule.isLivePriceRule()) {
+                    val quote = quotes[rule.symbol]
+                    if (quote == null) {
+                        failed = true
+                        continue
+                    }
+                    if (rule.priceType == "MARK_PRICE") quote.mark else quote.last
+                } else {
+                    val bar = MarketData.candles(rule.symbol, rule.interval, rule.priceType, limit = 1)
+                        .lastOrNull() ?: error("No closed candle")
+                    delay(150)
+                    BigDecimal.valueOf(bar.close)
+                }
+                if (deliverPrice(c, rule, price, meets(rule, price))) hits++
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                failed = true
+            }
+        }
+        CheckResult(failed, hits)
+    }
+
+    private fun reportCheck(c: Context, failed: Boolean, hits: Int) {
+        val timestamp = java.text.DateFormat.getDateTimeInstance().format(java.util.Date())
+        val status = if (failed) "بخشی از بررسی ناموفق بود" else "بررسی انجام شد"
+        WatchStore.status(c, "$status • $timestamp • اعلان: $hits")
+    }
+
+    suspend fun checkPrices(c: Context): Boolean {
+        val result = readPrices(c)
+        reportCheck(c, result.failed, result.hits)
+        return !result.failed
+    }
+
+    suspend fun check(c: Context, includePrices: Boolean = true): Boolean = tradeMutex.withLock {
+        if (!WatchStore.enabled(c)) return@withLock true
+        val result = if (includePrices) readPrices(c) else CheckResult(false, 0)
+        var failed = result.failed
+        var hits = result.hits
         try{
             val credentials=withContext(Dispatchers.IO){BitunixVault(c).load()}
             if(credentials!=null && WatchStore.enabled(c)){
@@ -140,7 +216,7 @@ internal object MarketMonitor {
                 }
             }
         }catch(e:CancellationException){throw e}catch(_:Exception){failed=true}
-        WatchStore.status(c,(if(failed)"بخشی از بررسی ناموفق بود" else "بررسی انجام شد")+" • "+java.text.DateFormat.getDateTimeInstance().format(java.util.Date())+" • اعلان: "+hits)
+        if (includePrices || hits > 0 || failed) reportCheck(c, failed, hits)
         !failed
     }
 }

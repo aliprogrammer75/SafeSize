@@ -41,6 +41,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.example.data.MarketAlertService
 import com.example.ui.DashboardScreen
 import com.example.ui.HomeScreen
 import com.example.ui.ChartHomeScreen
@@ -61,6 +62,11 @@ import com.example.ui.theme.AppTheme
 import androidx.compose.material3.Surface
 
 class MainActivity : ComponentActivity() {
+    override fun onResume() {
+        super.onResume()
+        MarketAlertService.startIfNeeded(this)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

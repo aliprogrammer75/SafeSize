@@ -2,6 +2,7 @@ package com.example.ui
 
 import android.Manifest
 import android.os.Build
+import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -24,21 +25,30 @@ fun MarketWatchScreen(){
     val context=LocalContext.current.applicationContext
     var rules by remember{mutableStateOf(WatchStore.read(context))}
     var enabled by remember{mutableStateOf(WatchStore.enabled(context))}
+    val tracking by MarketAlertService.tracking.collectAsState()
+    var noticePermission by remember { mutableStateOf(MarketMonitor.canNotify(context)) }
     var status by remember{mutableStateOf(WatchStore.status(context))}
     var show by remember{mutableStateOf(false)}
     var deleting by remember{mutableStateOf<WatchRule?>(null)}
     val permission=rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()){granted->
-        if(granted){WatchStore.setEnabled(context,true);enabled=true}else status="مجوز اعلان داده نشد"
+        if (granted) {
+            WatchStore.setEnabled(context, true)
+            enabled = true
+        }
+        noticePermission = MarketMonitor.canNotify(context)
     }
-    LaunchedEffect(enabled){
+    LaunchedEffect(Unit){
         while(isActive){
-            rules=WatchStore.read(context);status=WatchStore.status(context)
+            rules = WatchStore.read(context)
+            enabled = WatchStore.enabled(context)
+            status = WatchStore.status(context)
+            noticePermission = MarketMonitor.canNotify(context)
             delay(2000)
         }
     }
     LaunchedEffect(enabled){
         while(isActive && enabled){
-            MarketMonitor.check(context)
+            MarketMonitor.check(context, includePrices = MarketAlertService.tracking.value == MarketTracking.INACTIVE)
             delay(15000)
         }
     }
@@ -46,8 +56,30 @@ fun MarketWatchScreen(){
         Text("رصد بازار • Bitunix",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.Bold)
         Card{
             Column(Modifier.fillMaxWidth().padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
-                Row{Switch(enabled,{on->if(!on){WatchStore.setEnabled(context,false);enabled=false}else if(Build.VERSION.SDK_INT>=33)permission.launch(Manifest.permission.POST_NOTIFICATIONS)else{WatchStore.setEnabled(context,true);enabled=true}});Text("هشدار قیمت و TP/SL صرافی",modifier=Modifier.padding(12.dp))}
-                Text("در همین صفحه هر ۱۵ ثانیه پس از تکمیل درخواست؛ در پس‌زمینه حداقل ۱۵ دقیقه و ممکن است دیرتر. هشدار قیمت ممکن است حرکت کوتاه بازار را از دست بدهد؛ برای حفاظت سرمایه به حد ضرر صرافی تکیه کنید.",style=MaterialTheme.typography.bodySmall)
+                Row {
+                    Switch(enabled, { on ->
+                        if (on && Build.VERSION.SDK_INT >= 33 &&
+                            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                        ) permission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        else {
+                            WatchStore.setEnabled(context, on)
+                            enabled = on
+                        }
+                    })
+                    Text("هشدار گوشی", modifier = Modifier.padding(12.dp))
+                }
+                val trackingText = when {
+                    !noticePermission -> "اعلان‌های SafeSize را در تنظیمات گوشی فعال کنید"
+                    tracking == MarketTracking.LIVE -> "رصد زندهٔ قیمت در پس‌زمینه فعال است"
+                    tracking == MarketTracking.CONNECTING -> "در حال اتصال به قیمت زنده"
+                    tracking == MarketTracking.PERIODIC -> "بررسی دوره‌ای قیمت در پس‌زمینه فعال است"
+                    enabled && rules.any { it.active } -> "رصد زنده متوقف است؛ بررسی زمان‌بندی‌شده فعال است"
+                    else -> "رصد زنده با هشدار فعال شروع می‌شود"
+                }
+                Text(trackingText, style = MaterialTheme.typography.bodySmall)
+                if (enabled && noticePermission && tracking == MarketTracking.INACTIVE && rules.any { it.active }) {
+                    TextButton(onClick = { MarketAlertService.startIfNeeded(context) }) { Text("شروع رصد زنده") }
+                }
                 Text(status,style=MaterialTheme.typography.labelMedium)
                 TextButton(enabled=enabled,onClick={WatchStore.checkNow(context)}){Text("بررسی اکنون")}
             }
@@ -71,14 +103,22 @@ fun MarketWatchScreen(){
                         });Text(t,modifier=Modifier.padding(top=12.dp))}}
                     }
                     Row{
-                        TextButton(onClick={WatchStore.edit(context){list->list.map{v->if(v.id==r.id)v.copy(active=!v.active,hitAt=0)else v}};rules=WatchStore.read(context)}){Text(if(r.active)"توقف"else"فعال‌سازی مجدد")}
+                        TextButton(onClick={
+                            WatchStore.edit(context){list->list.map{v->if(v.id==r.id)v.copy(active=!v.active,hitAt=0)else v}}
+                            rules=WatchStore.read(context)
+                            if (!r.active) MarketAlertService.startIfNeeded(context)
+                        }){Text(if(r.active)"توقف"else"فعال‌سازی مجدد")}
                         TextButton(onClick={deleting=r}){Text("حذف")}
                     }
                 }
             }
         }
     }
-    if(show)AddWatchDialog(onDismiss={show=false},onAdd={r->WatchStore.edit(context){list->if(list.size<30)list+r else list};rules=WatchStore.read(context);show=false})
+    if (show) AddWatchDialog(onDismiss = { show = false }, onAdd = { rule ->
+        if (WatchStore.add(context, rule)) MarketAlertService.startIfNeeded(context)
+        rules = WatchStore.read(context)
+        show = false
+    })
     deleting?.let{r->AlertDialog(onDismissRequest={deleting=null},title={Text("حذف موقعیت "+r.symbol+"؟")},confirmButton={Button(onClick={WatchStore.edit(context){it.filterNot{v->v.id==r.id}};rules=WatchStore.read(context);deleting=null}){Text("حذف")}},dismissButton={TextButton(onClick={deleting=null}){Text("لغو")}})}
 }
 @Composable
