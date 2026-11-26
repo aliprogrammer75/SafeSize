@@ -52,14 +52,16 @@ private class ChartBridge(
     private val ready: () -> Unit,
     private val older: (Long) -> Unit,
     private val select: (String, String) -> Unit,
-    private val alert: (String, BigDecimal) -> Unit
+    private val alert: (String, BigDecimal, Boolean) -> Unit
 ) {
     @JavascriptInterface fun ready(){ready.invoke()}
     @JavascriptInterface fun older(timestamp:String){timestamp.toLongOrNull()?.takeIf{it>0}?.let(older)}
     @JavascriptInterface fun select(kind:String,value:String){if(kind in setOf("entry","sl","tp") && value.length<64)select.invoke(kind,value)}
-    @JavascriptInterface fun createAlert(condition: String, price: String) {
+    @JavascriptInterface fun createAlert(condition: String, price: String) = registerAlert(condition, price, false)
+    @JavascriptInterface fun createSmsAlert(condition: String, price: String) = registerAlert(condition, price, true)
+    private fun registerAlert(condition: String, price: String, sms: Boolean) {
         if (condition !in setOf("ABOVE", "BELOW") || !price.matches(Regex("[0-9]{1,20}(\\.[0-9]{1,16})?"))) return
-        price.toBigDecimalOrNull()?.takeIf { it.signum() > 0 }?.let { alert(condition, it) }
+        price.toBigDecimalOrNull()?.takeIf { it.signum() > 0 }?.let { alert(condition, it, sms) }
     }
 }
 @Composable
@@ -188,6 +190,9 @@ internal fun AdvancedChartDialog(
     var alerts by remember { mutableStateOf<List<WatchRule>>(emptyList()) }
     var snapshot by remember { mutableStateOf(ChartTradeSnapshot(emptyList())) }
     val positionReader = remember { BitunixChartPositions() }
+    val smsSettings = remember { SmsAlertSettings(context) }
+    var smsConnection by remember { mutableStateOf<SmsAlertConnection?>(null) }
+    var smsSaving by remember { mutableStateOf(false) }
     fun js(script:String){web?.evaluateJavascript(script,null)}
     fun alertResult(message: String) = js("window.SafeChart.alertResult(${JSONObject.quote(message)})")
     fun addAlert(rule: WatchRule) {
@@ -205,7 +210,7 @@ internal fun AdvancedChartDialog(
         if (granted && rule != null) addAlert(rule)
         else if (rule != null) alertResult("برای ثبت هشدار، مجوز اعلان را فعال کنید")
     }
-    fun createAlert(condition: String, price: BigDecimal) {
+    suspend fun createAlert(condition: String, price: BigDecimal, sms: Boolean) {
         val value = price.setScale(currentPrecision, RoundingMode.HALF_UP).stripTrailingZeros()
         if (value.signum() <= 0) {
             alertResult("قیمت هشدار با دقت این نماد معتبر نیست")
@@ -213,6 +218,26 @@ internal fun AdvancedChartDialog(
         }
         val rule = WatchRule(UUID.randomUUID().toString(), symbol, condition, value.toPlainString(), "",
             interval, "", emptyList(), priceType = type)
+        if (sms) {
+            val connected = smsConnection
+            if (connected == null) {
+                alertResult("ابتدا سرور پیامک را در صفحه رصد بازار متصل کنید")
+                return
+            }
+            if (smsSaving) return
+            smsSaving = true
+            try {
+                val added = SmsAlerts.create(connected, rule)
+                alertResult(if (added.mode == "dry-run") "هشدار آزمایشی روی سرور ثبت شد" else "هشدار پیامکی روی سرور ثبت شد")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: SmsAlertException) {
+                alertResult(e.message.orEmpty())
+            } catch (_: Exception) {
+                alertResult("پاسخ ثبت از سرور دریافت نشد. فهرست هشدارهای پیامکی را بررسی کنید")
+            } finally { smsSaving = false }
+            return
+        }
         if (Build.VERSION.SDK_INT >= 33 &&
             context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
@@ -221,6 +246,11 @@ internal fun AdvancedChartDialog(
                 notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         } else addAlert(rule)
+    }
+    LaunchedEffect(ready) {
+        if (!ready) return@LaunchedEffect
+        smsConnection = withContext(Dispatchers.IO) { runCatching { smsSettings.load() }.getOrNull() }
+        js("window.SafeChart.smsAvailable(${smsConnection != null})")
     }
     LaunchedEffect(ready, alertRevision) {
         if (!ready) return@LaunchedEffect
@@ -364,7 +394,7 @@ internal fun AdvancedChartDialog(
                         val n=value.toBigDecimalOrNull()
                         if(calculatorLinked && n!=null && n.signum()>0)currentSelect(kind,n.setScale(currentPrecision,RoundingMode.HALF_UP).stripTrailingZeros().toPlainString())
                     }},
-                    {condition, price -> scope.launch { createAlert(condition, price) }}
+                    {condition, price, sms -> scope.launch { createAlert(condition, price, sms) }}
                 ),"ChartNative")
                 webViewClient=object:WebViewClient(){
                     override fun onPageFinished(view:WebView,url:String){

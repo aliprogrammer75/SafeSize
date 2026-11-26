@@ -52,6 +52,7 @@ fun MarketWatchScreen(){
                 TextButton(enabled=enabled,onClick={WatchStore.checkNow(context)}){Text("بررسی اکنون")}
             }
         }
+        SmsAlertsCard()
         Button(enabled=rules.size<30,modifier=Modifier.fillMaxWidth(),onClick={show=true}){Text("افزودن موقعیت معاملاتی")}
         if(rules.isEmpty())Text("هنوز موقعیتی تعریف نشده است.")
         rules.forEach{r->

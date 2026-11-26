@@ -389,7 +389,8 @@ function finishGesture(e, commit) {
   if (isPosition(placement.name)) placement.points = positionPoints(placement.name,g.point,g.pane);
   else placement.points.push(g.point);
   if (placement.alert) {
-   cancelTouch();alertMenu(g.point.value);
+   const delivery=placement.alert;
+   cancelTouch();alertMenu(g.point.value,delivery);
   } else if (placement.level) {
    if (window.ChartNative) ChartNative.select(placement.level,String(g.point.value));
    cancelTouch();

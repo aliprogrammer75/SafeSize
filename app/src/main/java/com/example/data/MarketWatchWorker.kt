@@ -145,5 +145,5 @@ internal object MarketMonitor {
     }
 }
 class MarketWatchWorker(context:Context,params:WorkerParameters):CoroutineWorker(context,params){
-    override suspend fun doWork():Result=try{MarketMonitor.check(applicationContext);Result.success()}catch(e:CancellationException){throw e}catch(_:Exception){Result.failure()}
+    override suspend fun doWork():Result=try{if(MarketMonitor.check(applicationContext)) Result.success() else Result.retry()}catch(e:CancellationException){throw e}catch(_:Exception){Result.retry()}
 }

@@ -15,8 +15,9 @@ const indicatorNames=['EMA','SMA','RSI','MACD','BOLL','ATR','VOL','MA','SAR','BB
 const mainIndicators=new Set(['MA','EMA','SMA','BOLL','SAR','BBI','AVP']);
 const indicatorLabel=name=>({BOLL:'Bollinger Bands',VOL:'Volume'})[name]||name;
 let levelsEnabled=true, marketSymbol='',marketType='LAST_PRICE',lastPickedPrice=null;
+let smsAlertAvailable=false;
 let chartAlerts=[],accountLevels=[],accountStatus='';
-function alertMenu(initial){
+function alertMenu(initial, chosenDelivery='local'){
  if(!initialized){say('ابتدا نمودار را بارگیری کنید');return}
  if(!window.ChartNative?.createAlert){say('ثبت هشدار در نسخه اندروید در دسترس است');return}
  menu(()=>{
@@ -24,17 +25,26 @@ function alertMenu(initial){
   const price=makeField('قیمت هشدار',formatValue(initial??lastPickedPrice??latest),'number');price.step='any';
   const condition=choice('شرط', [['ABOVE','رسیدن از پایین / بالاتر'],['BELOW','رسیدن از بالا / پایین‌تر']],
    Number(price.value)<latest?'BELOW':'ABOVE');
+  const delivery=smsAlertAvailable?choice('شیوه هشدار',[['local','اعلان گوشی'],['sms','پیامک از سرور']],chosenDelivery):null;
   btn('انتخاب قیمت روی چارت',()=>{
    startPlacement('horizontalStraightLine');
-   if(placement){placement.alert=true;say('قیمت هشدار را روی چارت لمس کنید')}
+   if(placement){placement.alert=delivery?.value||'local';say('قیمت هشدار را روی چارت لمس کنید')}
   });
   btn('ثبت هشدار',()=>{
    if(!Number.isFinite(price.valueAsNumber)||price.valueAsNumber<=0){say('قیمت هشدار معتبر نیست');return}
-   ChartNative.createAlert(condition.value,formatValue(price.valueAsNumber));
+   const value=formatValue(price.valueAsNumber);
+   if(delivery?.value==='sms'){
+    ChartNative.createSmsAlert(condition.value,value);
+    say('در حال ثبت هشدار پیامکی روی سرور…');
+   }else ChartNative.createAlert(condition.value,value);
    closeSheet();
   });
-  const hint=document.createElement('p');hint.textContent='هشدار '+(marketType==='MARK_PRICE'?'Mark':'Last')+
-   ' یک‌بار فعال می‌شود. در پس‌زمینه بررسی دوره‌ای است و ممکن است با تأخیر انجام شود.';panel.append(hint);
+  const hint=document.createElement('p');
+  const explain=()=>{hint.textContent=delivery?.value==='sms'
+   ? 'سرور قیمت را حتی پس از بستن برنامه بررسی می‌کند.'
+   : 'بررسی اعلان گوشی در پس‌زمینه دوره‌ای است.';};
+  if(delivery)delivery.onchange=explain;
+  explain();panel.append(hint);
  },'هشدار قیمت · '+marketSymbol);
 }
 function positionsMenu(){
@@ -612,6 +622,7 @@ window.SafeChart={
   callback?.([],true);say('دریافت تاریخچه ناموفق بود. در منوی بازه دوباره تلاش کنید');
  },
  precision(digits){if(chart){pricePrecision=digits;chart.setPriceVolumePrecision(digits,6);redrawLayer()}},
+ smsAvailable(value){smsAlertAvailable=value},
  alertResult(message){say(message)},
  marketLayers(alerts,levels,status){
   chartAlerts=alerts;accountLevels=levels;accountStatus=status;redrawLayer();
