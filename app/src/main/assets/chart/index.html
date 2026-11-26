@@ -1,6 +1,17 @@
 <!DOCTYPE html>
 <html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'none'; img-src 'self' data:; object-src 'none'; base-uri 'none'"><link rel="stylesheet" href="chart.css"><script defer src="klinecharts.min.js"></script><script defer src="chart.js"></script><title>SafeSize Chart</title></head>
-<body><div id="toolbar">
-<div class="bar"><button id="ind">اندیکاتورها</button><button id="draw">ترسیم</button><button id="objects">مدیریت ابزارها</button><button id="templates">قالب‌ها</button><button id="cancel" hidden>لغو ترسیم</button><button id="style">نوع چارت</button><button id="levels">ورود / SL / TP</button><button id="more">تاریخچه</button><button id="live">آخرین کندل</button></div>
-<div id="selection" class="bar" hidden><span id="selname"></span><button id="selsettings">تنظیمات</button><button id="selmove">جابجایی</button><button id="seldel">حذف</button><button id="selmore">بیشتر</button></div><div id="panel" hidden></div><div id="notice">در حال آماده‌سازی موتور نمودار…</div></div>
-<div id="chartwrap"><div id="chart" dir="ltr"></div><div id="touchpad" hidden><div id="guide" hidden></div></div></div><footer>Bitunix Futures • KLineChart • SafeSize</footer></body></html>
+<body>
+<div id="notice" role="status">در حال آماده‌سازی نمودار…</div>
+<div id="chartwrap"><div id="chart" dir="ltr"></div><div id="touchpad" hidden><div id="guide" hidden></div></div><div id="quick" hidden></div><div id="selection" class="bar" hidden><span id="selname"></span><button id="selsettings">تنظیمات</button><button id="selmove">جابجایی</button><button id="seldel">حذف</button><button id="selmore">بیشتر</button></div></div>
+<div id="toolbar" class="bar" aria-label="ابزارهای چارت">
+<button id="draw" class="navtool" aria-label="ترسیم"><svg viewBox="0 0 24 24"><path d="m4 19 4-1L20 6l-4-4L4 14zM14 4l4 4M3 22h18"/></svg><span>ترسیم</span></button>
+<button id="ind" class="navtool"><svg viewBox="0 0 24 24"><path d="M3 18 8 9l5 5 7-10M3 22h18"/></svg><span>اندیکاتور</span></button>
+<button id="objects" class="navtool"><svg viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5zM3 12l9 5 9-5M3 16l9 5 9-5"/></svg><span>ابزارها</span></button>
+<button id="options" class="navtool"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg><span>بیشتر</span></button>
+<button id="live" class="navtool"><svg viewBox="0 0 24 24"><path d="m3 5 7 7-7 7m9-14 7 7-7 7"/></svg><span>آخرین</span></button>
+<button id="cancel" class="navtool" hidden>لغو</button>
+</div>
+<div id="backdrop" hidden></div>
+<section id="sheet" hidden aria-label="تنظیمات نمودار"><div class="handle"></div><div class="sheetheader"><strong id="sheettitle">ابزارها</strong><button id="closepanel" aria-label="بستن">×</button></div><div id="panel" hidden></div></section>
+<div hidden><button id="templates">قالب‌ها</button><button id="style">نوع چارت</button><button id="levels">ورود / SL / TP</button><button id="more">تاریخچه</button></div>
+</body></html>

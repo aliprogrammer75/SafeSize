@@ -43,21 +43,28 @@ private class ChartBridge(private val ready:()->Unit,private val older:(Long)->U
 fun AdvancedChartDialog(symbol:String, initialInterval:String, precision:Int, entry:String, stop:String, target:String, onDismiss:()->Unit,onSelect:(String,String)->Unit){
     var interval by remember{mutableStateOf(initialInterval)}
     var type by remember{mutableStateOf("LAST_PRICE")}
-    var compact by remember{mutableStateOf(false)}
+    var tfMenu by remember{mutableStateOf(false)}
+    var priceMenu by remember{mutableStateOf(false)}
     Dialog(onDismissRequest=onDismiss,properties=DialogProperties(usePlatformDefaultWidth=false,decorFitsSystemWindows=true)){
         Surface(Modifier.fillMaxSize(),color=MaterialTheme.colorScheme.background){
-            Column(Modifier.fillMaxSize().padding(horizontal=4.dp,vertical=2.dp)){
-                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
-                    Text(symbol+" • Bitunix",style=MaterialTheme.typography.titleMedium,modifier=Modifier.padding(top=12.dp))
-                    Row { TextButton(onClick={compact=!compact}){Text(if(compact)"تنظیمات" else "گسترش")}; TextButton(onClick=onDismiss){Text("بازگشت")} }
-                }
-                if (!compact) {
-                    Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(4.dp)){
-                        MarketData.intervals.forEach{t->FilterChip(t==interval,{interval=t},{Text(t)})}
-                    }
-                    Row(horizontalArrangement=Arrangement.spacedBy(4.dp)){
-                        FilterChip(type=="LAST_PRICE",{type="LAST_PRICE"},{Text("Last Price")})
-                        FilterChip(type=="MARK_PRICE",{type="MARK_PRICE"},{Text("Mark Price")})
+            Column(Modifier.fillMaxSize()){
+                Row(Modifier.fillMaxWidth().padding(horizontal=8.dp),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=androidx.compose.ui.Alignment.CenterVertically){
+                    Text(symbol,style=MaterialTheme.typography.titleMedium)
+                    Row(verticalAlignment=androidx.compose.ui.Alignment.CenterVertically) {
+                        Box {
+                            TextButton(onClick={tfMenu=true},contentPadding=PaddingValues(horizontal=8.dp)){Text(interval+" ▾")}
+                            DropdownMenu(expanded=tfMenu,onDismissRequest={tfMenu=false}){
+                                MarketData.intervals.forEach{t->DropdownMenuItem(text={Text(t)},onClick={interval=t;tfMenu=false})}
+                            }
+                        }
+                        Box {
+                            TextButton(onClick={priceMenu=true},contentPadding=PaddingValues(horizontal=6.dp)){Text(if(type=="LAST_PRICE")"Last ▾" else "Mark ▾")}
+                            DropdownMenu(expanded=priceMenu,onDismissRequest={priceMenu=false}){
+                                DropdownMenuItem(text={Text("Last Price")},onClick={type="LAST_PRICE";priceMenu=false})
+                                DropdownMenuItem(text={Text("Mark Price")},onClick={type="MARK_PRICE";priceMenu=false})
+                            }
+                        }
+                        TextButton(onClick=onDismiss,contentPadding=PaddingValues(horizontal=6.dp)){Text("بازگشت")}
                     }
                 }
                 key(symbol,interval,type){
@@ -146,7 +153,7 @@ fun AdvancedChartDialog(symbol:String, initialInterval:String, precision:Int, en
         if(ready && lastClosed>0) js("window.SafeChart.levels("+JSONObject.quote(entry)+","+JSONObject.quote(stop)+","+JSONObject.quote(target)+")")
     }
     Column(modifier){
-        Text(status,style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(status,style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(horizontal=8.dp))
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
         val h = maxHeight
         val w = maxWidth
