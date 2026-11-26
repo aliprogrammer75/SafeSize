@@ -17,8 +17,22 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.6'
-      - uses: android-actions/setup-android@v3
-      - run: sdkmanager 'platforms;android-34' 'build-tools;34.0.0'
+      - name: Prepare installed Android SDK
+        shell: bash
+        run: |
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          if [[ ! -f "$SDK/platforms/android-34/android.jar" || ! -x "$SDK/build-tools/34.0.0/aapt2" ]]; then
+            MANAGER="$SDK/cmdline-tools/latest/bin/sdkmanager"
+            if [[ ! -x "$MANAGER" ]]; then
+              MANAGER=$(find "$SDK/cmdline-tools" -path '*/bin/sdkmanager' -type f | sort -V | tail -n 1)
+            fi
+            test -x "$MANAGER"
+            "$MANAGER" --sdk_root="$SDK" 'platforms;android-34' 'build-tools;34.0.0'
+          fi
+          test -f "$SDK/platforms/android-34/android.jar"
+          test -x "$SDK/build-tools/34.0.0/aapt2"
       - run: gradle :app:assembleDebug --no-daemon
       - uses: actions/upload-artifact@v4
         with:
