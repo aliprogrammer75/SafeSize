@@ -26,7 +26,7 @@ import java.security.MessageDigest
 internal data class WatchRule(
     val id:String, val symbol:String, val type:String, val low:String, val high:String,
     val interval:String, val strategy:String, val checklist:List<String>, val checked:List<Int> = emptyList(),
-    val active:Boolean=true, val hitAt:Long=0, val lastPrice:String="", val checkedAt:Long=0
+    val active:Boolean=true, val hitAt:Long=0, val lastPrice:String="", val checkedAt:Long=0, val priceType:String="LAST_PRICE"
 )
 internal object WatchStore {
     private val lock=Any()
@@ -34,6 +34,10 @@ internal object WatchStore {
     private val json=Json{ignoreUnknownKeys=true}
     fun read(c:Context):List<WatchRule> = synchronized(lock) { runCatching{json.decodeFromString<List<WatchRule>>(prefs(c).getString("rules","[]")?:"[]")}.getOrDefault(emptyList()) }
     fun edit(c:Context,action:(List<WatchRule>)->List<WatchRule>)=synchronized(lock){prefs(c).edit().putString("rules",json.encodeToString(action(read(c)))).commit()}
+    fun add(c:Context,rule:WatchRule):Boolean = synchronized(lock) {
+        val current=read(c)
+        current.size<30 && edit(c){it+rule}
+    }
     fun enabled(c:Context)=prefs(c).getBoolean("enabled",false)
     fun enabledSince(c:Context)=prefs(c).getLong("since",0)
     fun status(c:Context)=prefs(c).getString("status","هنوز بررسی نشده")?:""
@@ -69,6 +73,41 @@ internal object MarketMonitor {
             .setStyle(NotificationCompat.BigTextStyle().bigText(text)).setContentIntent(intent).setAutoCancel(true).build())
         return true
     }
+    private fun deliverPrice(c:Context,rule:WatchRule,price:BigDecimal,met:Boolean):Boolean {
+        var sent=false
+        WatchStore.edit(c){items->items.map{current->
+            if(current.id!=rule.id || !current.active || !WatchStore.enabled(c)) current
+            else {
+                val now=System.currentTimeMillis()
+                val text=if(rule.strategy.isBlank()) {
+                    val source=if(rule.priceType=="MARK_PRICE") "Mark" else "Last"
+                    "$source ${price.stripTrailingZeros().toPlainString()} • سطح ${rule.low} USDT"
+                } else "شرط ${rule.strategy} برقرار است"
+                sent=met && notify(c,rule.id,"هشدار قیمت ${rule.symbol}",text)
+                current.copy(lastPrice=price.stripTrailingZeros().toPlainString(),checkedAt=now,
+                    active=!sent,hitAt=if(sent)now else current.hitAt)
+            }
+        }}
+        return sent
+    }
+
+    private fun meets(rule:WatchRule,price:BigDecimal):Boolean {
+        val level=rule.low.toBigDecimalOrNull() ?: return false
+        return when(rule.type){
+            "ABOVE","CLOSE_ABOVE" -> price>=level
+            "BELOW","CLOSE_BELOW" -> price<=level
+            "ZONE" -> rule.high.toBigDecimalOrNull()?.let{price in level..it}==true
+            else -> false
+        }
+    }
+
+    fun observeChartPrice(c:Context,symbol:String,priceType:String,price:BigDecimal) {
+        if(!WatchStore.enabled(c))return
+        WatchStore.read(c).filter {
+            it.active && it.symbol==symbol && it.priceType==priceType && it.type in setOf("ABOVE","BELOW","ZONE")
+        }.filter{meets(it,price)}.forEach{deliverPrice(c,it,price,true)}
+    }
+
     private fun hash(s:String)=MessageDigest.getInstance("SHA-256").digest(s.toByteArray()).joinToString(""){"%02x".format(it.toInt() and 255)}
     suspend fun check(c:Context):Boolean=mutex.withLock {
         if(!WatchStore.enabled(c))return@withLock true
@@ -79,30 +118,12 @@ internal object MarketMonitor {
         for(r in rules){
             try{
                 if(!WatchStore.enabled(c))break
-                val quote=quotes[r.symbol]?.last?:continue
-                val lo=r.low.toBigDecimal()
-                val high=r.high.toBigDecimalOrNull()
-                val met=when(r.type){
-                    "ABOVE"->quote>=lo
-                    "BELOW"->quote<=lo
-                    "ZONE"->high!=null && quote in lo..high
-                    "CLOSE_ABOVE","CLOSE_BELOW"->{
-                        val bar=MarketData.candles(r.symbol,r.interval).lastOrNull()?:error("No candle")
-                        val v=BigDecimal.valueOf(bar.close)
-                        if(r.type=="CLOSE_ABOVE")v>=lo else v<=lo
-                    }
-                    else->false
-                }
-                if(!WatchStore.enabled(c))break
-                val now=System.currentTimeMillis()
-                WatchStore.edit(c){items->items.map{current->
-                    if(current.id!=r.id || !current.active)current
-                    else{
-                        val alerted=met && notify(c,r.id,"موقعیت قیمتی "+r.symbol, "شرط "+r.strategy.ifBlank{"واچ‌لیست"}+" برقرار است؛ چک‌لیست و چارت را بررسی کنید. این سیگنال قطعی ورود نیست.")
-                        if(alerted)hits++
-                        current.copy(lastPrice=quote.stripTrailingZeros().toPlainString(),checkedAt=now,active=!alerted,hitAt=if(alerted)now else current.hitAt)
-                    }
-                }}
+                val ticker=quotes[r.symbol]?:continue
+                val price=if(r.type=="CLOSE_ABOVE" || r.type=="CLOSE_BELOW") {
+                    val bar=MarketData.candles(r.symbol,r.interval,r.priceType).lastOrNull()?:error("No candle")
+                    BigDecimal.valueOf(bar.close)
+                } else if (r.priceType=="MARK_PRICE") ticker.mark else ticker.last
+                if(deliverPrice(c,r,price,meets(r,price))) hits++
                 // Stay within public API rate limits when checking many candle rules.
                 delay(150)
             }catch(e:CancellationException){throw e}catch(_:Exception){failed=true}

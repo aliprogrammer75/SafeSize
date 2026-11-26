@@ -13,7 +13,7 @@ const defaultFib = [0, .236, .382, .5, .618, .66, .705, .786, 1, 1.618].map(v =>
 const defaults = {
  color: '#8b9efa', width: 2, style: 'solid', snap: 'normal', fib: defaultFib,
  reverse: false, extendLeft: false, extendRight: false, showPrice: true, showPercent: true,
- background:'#8b9efa', opacity:.13, labels:'left', targetColor:'#16a394', riskColor:'#e24b67'
+ background:'#8b9efa', opacity:.13, labels:'left', labelFormat:'percent', labelOffset:'above', labelSize:11, trend:false, targetColor:'#16a394', riskColor:'#e24b67'
 };
 let placement = null, gesture = null, frame = 0, pricePrecision = 8;
 let timelineInterval = '15m', drawingKey = '';
@@ -180,7 +180,8 @@ function renderGeometry(d, g, handles) {
  }
  context.setLineDash([]);
  context.font = '11px system-ui,sans-serif'; context.textAlign = 'left';
- for (const {x,y,text,color,align} of g.labels) {
+ for (const {x,y,text,color,align,size} of g.labels) {
+  context.font = (size||11)+'px system-ui,sans-serif';
   context.fillStyle = color; context.textAlign = align; context.fillText(text,x,y);
  }
  if (!handles) return;
@@ -191,7 +192,7 @@ function renderGeometry(d, g, handles) {
  }
 }
 function draftDrawing() {
- if ((!placement?.pane && gesture?.kind !== 'place') || !placement || placement.level) return null;
+ if ((!placement?.pane && gesture?.kind !== 'place') || !placement || (placement.level || placement.alert)) return null;
  const points = [...placement.points];
  if (gesture?.kind === 'place' && gesture.point) {
   if (isPosition(placement.name)) return {...placement, pane:gesture.pane.key, points:positionPoints(placement.name,gesture.point,gesture.pane)};
@@ -200,6 +201,50 @@ function draftDrawing() {
  if (!points.length) return null;
  while (points.length < numberOfPoints[placement.name]) points.push(points[points.length - 1]);
  return {...placement, pane:placement.pane || gesture.pane.key, points};
+}
+const tradeColors={
+ entry:'#639aff', fill:'#639aff', tp:'#2bbfad', sl:'#fa728c', pending:'#fbbf54',
+ 'pending-tp':'#2bbfad','pending-sl':'#fa728c', alert:'#c895f7'
+};
+function renderTradeLevels(pane,map){
+ const w=pane.rect.width,h=pane.rect.height;
+ const trades=read('hideTradeLevels',false)?[]:accountLevels;
+ const levels=[...trades,...chartAlerts.map(l=>({...l,kind:'alert'}))];
+ const tags=[];
+ for(const l of levels){
+  const y=map.valueY(l.price),color=tradeColors[l.kind];
+  if(!Number.isFinite(y)||y<4||y>h-4||!color)continue;
+  if(l.kind==='fill'){
+   if(l.timestamp>0){
+    const x=map.xy({timestamp:l.timestamp,value:l.price}).x;
+    if(x<0||x>w)continue;
+    context.fillStyle=color;
+    polygon(context,[{x,y:y-6},{x:x+6,y},{x,y:y+6},{x:x-6,y}]);context.fill();
+    tags.push({y,x:Math.min(w-10,x),color,label:l.label});
+   }
+   continue;
+  }
+  context.strokeStyle=color;context.lineWidth=1;
+  context.setLineDash(l.kind==='entry'?[]:l.kind.startsWith('pending')?[2,4]:[6,4]);
+  context.globalAlpha=.76;
+  context.beginPath();context.moveTo(0,y);context.lineTo(w,y);context.stroke();
+  context.globalAlpha=1;
+  tags.push({y,x:w-5,color,label:l.label+'  '+formatValue(l.price)});
+ }
+ context.setLineDash([]);context.font='11px system-ui,sans-serif';context.textAlign='right';
+ const spacing=17;
+ const visible=tags.sort((a,b)=>a.y-b.y).slice(0,Math.floor((h-8)/spacing));
+ let upper=0;
+ for(const tag of visible){tag.y=Math.max(tag.y,upper+spacing);upper=tag.y;}
+ let lower=h+2;
+ for(const tag of visible.slice().reverse()){tag.y=Math.min(tag.y,lower-spacing);lower=tag.y;}
+ for(const {y,x,color,label} of visible){
+  const width=context.measureText(label).width;
+  const to=Math.max(width+10,x);
+  context.fillStyle=document.body.classList.contains('light')?'#fff':'#101825';
+  context.fillRect(to-width-6,y-13,width+10,16);
+  context.fillStyle=color;context.fillText(label,to,y-1);
+ }
 }
 function renderDrawings() {
  frame = 0;
@@ -212,13 +257,15 @@ function renderDrawings() {
  if (!initialized) return;
  const draft = draftDrawing();
  for (const pane of panes()) {
-  const items = drawings.filter(d => d.visible && d.pane === pane.key).map(d => d.id === gesture?.draft?.id ? gesture.draft : d);
+  const items = drawings.filter(d => d.visible && visibleAtInterval(d) && d.pane === pane.key).map(d => d.id === gesture?.draft?.id ? gesture.draft : d);
   if (draft?.pane === pane.key) items.push(draft);
-  if (!items.length) continue;
+  const marketLayer=pane.key==='main'&&(chartAlerts.length||accountLevels.length);
+  if (!items.length&&!marketLayer) continue;
   const map = mapper(pane);
   if (!map) continue;
   context.save(); context.translate(pane.left,pane.top);
   context.beginPath(); context.rect(0,0,pane.rect.width,pane.rect.height); context.clip();
+  if(marketLayer)renderTradeLevels(pane,map);
   for (const d of items) renderGeometry(d,geometry(d,pane,map),d.id === selected || d === draft);
   context.restore();
  }
@@ -230,7 +277,7 @@ function hitDrawing(pane, x, y) {
  const map = mapper(pane);
  if (!map) return null;
  const point = {x:x - pane.rect.left, y:y - pane.rect.top};
- const candidates = drawings.filter(d => d.visible && d.pane === pane.key).reverse();
+ const candidates = drawings.filter(d => d.visible && visibleAtInterval(d) && d.pane === pane.key).reverse();
  const active = candidates.find(d => d.id === selected);
  if (active) {
   const pixels = geometry(active,pane,map).points;
@@ -260,7 +307,7 @@ function startPlacement(name) {
  if (!initialized) { say('ابتدا تاریخچه نمودار را دریافت کنید'); return; }
  cancelTouch();
  selection(null);
- placement = {name, pane:null, points:[], config:config(read('tool:'+name,defaults))};
+ placement = {name, pane:null, points:[], config:config(read('tool:'+name,{...defaults,intervals:[timelineInterval]}))};
  say(isPosition(name) ?
   'قیمت ورود را انتخاب کنید و سپس دستگیره‌های سود و ضرر را تنظیم کنید' : 'برای ثبت نقطه، روی نمودار لمس کنید و انگشت را بردارید');
  $('cancel').hidden = false;
@@ -289,7 +336,7 @@ function updateGesture(e) {
   const y = Math.max(0,Math.min(r.height,e.clientY-r.top));
   chart.executeAction('onCrosshairChange',{x,y,paneId:id});
   const point = map?.point(x,y);
-  if (point) showGuide(g.pane,map,point);
+  if (point) {g.cursorPoint=point;showGuide(g.pane,map,point)}
   return;
  }
  if (g.kind !== 'place' && g.kind !== 'edit') { moveAxis(g,e);return; }
@@ -331,14 +378,19 @@ function finishGesture(e, commit) {
  if (commit && e) updateGesture(e);
  gesture = null;
  $('guide').hidden = true;
- if (g.kind === 'cursor') return;
+ if (g.kind === 'cursor') {
+  if(commit&&g.cursorPoint&&g.pane.key==='main')lastPickedPrice=g.cursorPoint.value;
+  return;
+ }
  if (g.kind !== 'place' && g.kind !== 'edit') { finishAxis(g,commit);redrawLayer();return; }
  $('guide').hidden = true;
  if (commit && g.kind === 'place' && g.point) {
   placement.pane = g.pane.key;
   if (isPosition(placement.name)) placement.points = positionPoints(placement.name,g.point,g.pane);
   else placement.points.push(g.point);
-  if (placement.level) {
+  if (placement.alert) {
+   cancelTouch();alertMenu(g.point.value);
+  } else if (placement.level) {
    if (window.ChartNative) ChartNative.select(placement.level,String(g.point.value));
    cancelTouch();
    say('سطح به ماشین‌حساب منتقل شد');
@@ -450,7 +502,7 @@ function drawingPointerDown(e) {
   return;
  }
  blank = null;
- if (placement && ((placement.level && pane.key !== 'main') || (placement.pane && placement.pane !== pane.key))) {
+ if (placement && (((placement.level || placement.alert) && pane.key !== 'main') || (placement.pane && placement.pane !== pane.key))) {
   say('نقطه را در همان پنل انتخاب کنید'); return;
  }
  if (hit) {

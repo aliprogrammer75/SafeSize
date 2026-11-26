@@ -45,3 +45,14 @@ input,select{background:var(--card);color:var(--text);border:1px solid var(--bor
 @media (orientation:landscape){#sheet{max-height:90%;width:min(550px,90%);margin:0 auto}#toolbar{height:42px;justify-content:center}.navtool{flex:0 0 62px;min-height:36px;flex-direction:row;gap:4px}.navtool svg{width:17px;height:17px}}
 #toolbar.placing #ind,#toolbar.placing #options{display:none}
 #guide.label-below #guide-label{bottom:auto;top:calc(100% + 10px)}
+.settings-tabs{position:sticky;top:0;z-index:2;background:var(--surface);padding:2px 0 6px}
+.settings-tabs button{flex:1}
+.settings-actions{position:sticky;bottom:-4px;background:var(--surface);padding:5px 0;display:flex;align-items:center;gap:6px;flex-wrap:wrap;z-index:2}
+#panel .settings-actions label{margin:0;flex:1}
+.settings-actions button{font-size:12px;padding:6px}
+.interval-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;margin-top:6px}
+#panel .interval-options label{direction:ltr;margin:0;padding:6px;background:var(--card);border-radius:7px}
+#panel section>button{margin:3px}
+#history{position:absolute;right:7px;top:4px;min-height:28px;z-index:6;font-size:11px;padding:4px 7px;background:var(--surface)}
+#alert-price{position:absolute;right:7px;top:36px;z-index:6;min-height:32px;width:34px;padding:4px;background:var(--surface)}
+#alert-price svg{width:19px;height:19px}

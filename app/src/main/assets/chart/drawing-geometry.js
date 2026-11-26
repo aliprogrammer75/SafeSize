@@ -55,8 +55,8 @@ function drawingGeometry(d, p, width, height, format, barCount, priceY) {
   lines.push({from, to, color, size, style});
  const fill = (points, color = cfg.background, opacity = cfg.opacity) =>
   fills.push({points, color, opacity});
- const label = (x, y, text, color = cfg.color, align = 'left') =>
-  labels.push({x, y, text, color, align});
+ const label = (x, y, text, color = cfg.color, align = 'left', size = 11) =>
+  labels.push({x, y, text, color, align, size});
  const rect = (x1, y1, x2, y2) => [xy(x1,y1), xy(x2,y1), xy(x2,y2), xy(x1,y2)];
  const border = vertices => vertices.forEach((v, i) => line(v, vertices[(i + 1) % vertices.length]));
  function extend(from, to, left, right) {
@@ -72,7 +72,7 @@ function drawingGeometry(d, p, width, height, format, barCount, priceY) {
  }
  function fibLabel(from, to, level, value, color) {
   const parts = [];
-  if (cfg.showPercent) parts.push(Number((level * 100).toFixed(4)) + '%');
+  if (cfg.showPercent) parts.push(cfg.labelFormat === 'number' ? String(level) : Number((level * 100).toFixed(4)) + '%');
   if (cfg.showPrice) parts.push(format(value));
   if (!parts.length) return;
   const left = Math.min(from.x, to.x), right = Math.max(from.x, to.x);
@@ -80,7 +80,7 @@ function drawingGeometry(d, p, width, height, format, barCount, priceY) {
   x = Math.max(4, Math.min(width - 4, x));
   const y = Math.abs(to.x - from.x) > .01 ?
    from.y + (x - from.x) / (to.x - from.x) * (to.y - from.y) : from.y;
-  label(x, y - 4, parts.join('  ·  '), color, cfg.labels);
+  label(x,y+(cfg.labelOffset==='below'?(cfg.labelSize||11)+3:-4),parts.join('  ·  '),color,cfg.labels,cfg.labelSize);
  }
  if (d.name === 'horizontalStraightLine') {
   line(xy(0, a.y), xy(width, a.y)); label(width - 6, a.y - 4, format(d.points[0].value), cfg.color, 'right');
@@ -137,6 +137,7 @@ function drawingGeometry(d, p, width, height, format, barCount, priceY) {
   };
   const levels = d.name === 'fibonacciLine' || d.name === 'fibChannel' ? cfg.fib :
    (d.name === 'priceChannelLine' ? [0, .5, 1] : [0, 1]).map(v => ({v, on: true}));
+  if(cfg.trend&&(d.name==='fibonacciLine'||d.name==='fibChannel'))line(a,b,cfg.color,cfg.width,'dashed');
   const enabled = levels.filter(l => l.on).sort((l, r) => l.v - r.v);
   let previous = null;
   for (const level of enabled) {

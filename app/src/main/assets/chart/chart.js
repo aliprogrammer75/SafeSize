@@ -1,6 +1,6 @@
 'use strict';
 const $=id=>document.getElementById(id), panel=$('panel'), info=$('notice');
-let chart=null, indicators={}, drawings=[], selected=null, pendingOlder=false, pendingCallback=null, more=true, levelValues=['','',''], initialized=false, currentStyle='candle_solid';
+let chart=null, indicators={}, drawings=[], selected=null, pendingOlder=false, pendingCallback=null, historyRange=null, more=true, levelValues=['','',''], initialized=false, currentStyle='candle_solid';
 const overlayTools=[
  ['segment','خط روند','trendline'],['horizontalStraightLine','خط افقی','horizontal line'],
  ['horizontalRay','نیم‌خط افقی','horizontal ray'],['verticalStraightLine','خط عمودی','vertical line'],
@@ -14,7 +14,51 @@ const toolLabel=name=>overlayTools.find(x=>x[0]===name)?.[1] || name;
 const indicatorNames=['EMA','SMA','RSI','MACD','BOLL','ATR','VOL','MA','SAR','BBI','KDJ','OBV','CCI','DMI','WR','BIAS','BRAR','VR','MTM','EMV','CR','PSY','AO','DMA','ROC','TRIX','PVT','AVP'];
 const mainIndicators=new Set(['MA','EMA','SMA','BOLL','SAR','BBI','AVP']);
 const indicatorLabel=name=>({BOLL:'Bollinger Bands',VOL:'Volume'})[name]||name;
-let levelsEnabled=true;
+let levelsEnabled=true, marketSymbol='',marketType='LAST_PRICE',lastPickedPrice=null;
+let chartAlerts=[],accountLevels=[],accountStatus='';
+function alertMenu(initial){
+ if(!initialized){say('ابتدا نمودار را بارگیری کنید');return}
+ if(!window.ChartNative?.createAlert){say('ثبت هشدار در نسخه اندروید در دسترس است');return}
+ menu(()=>{
+  const latest=chart.getDataList()[chart.getDataList().length-1]?.close;
+  const price=makeField('قیمت هشدار',formatValue(initial??lastPickedPrice??latest),'number');price.step='any';
+  const condition=choice('شرط', [['ABOVE','رسیدن از پایین / بالاتر'],['BELOW','رسیدن از بالا / پایین‌تر']],
+   Number(price.value)<latest?'BELOW':'ABOVE');
+  btn('انتخاب قیمت روی چارت',()=>{
+   startPlacement('horizontalStraightLine');
+   if(placement){placement.alert=true;say('قیمت هشدار را روی چارت لمس کنید')}
+  });
+  btn('ثبت هشدار',()=>{
+   if(!Number.isFinite(price.valueAsNumber)||price.valueAsNumber<=0){say('قیمت هشدار معتبر نیست');return}
+   ChartNative.createAlert(condition.value,formatValue(price.valueAsNumber));
+   closeSheet();
+  });
+  const hint=document.createElement('p');hint.textContent='هشدار '+(marketType==='MARK_PRICE'?'Mark':'Last')+
+   ' یک‌بار فعال می‌شود. در پس‌زمینه بررسی دوره‌ای است و ممکن است با تأخیر انجام شود.';panel.append(hint);
+ },'هشدار قیمت · '+marketSymbol);
+}
+function positionsMenu(){
+ menu(()=>{
+  if(accountStatus){const line=document.createElement('p');line.textContent=accountStatus;panel.append(line)}
+  for(const level of accountLevels){
+   const row=document.createElement('p');row.dir='auto';
+   row.textContent=level.label+'  ·  '+formatValue(level.price)+(level.timestamp>0?'  ·  '+
+    new Date(level.timestamp).toISOString().slice(0,16).replace('T',' ')+' UTC':'');
+   panel.append(row);
+  }
+  if(!accountLevels.length&&!accountStatus)panel.append(document.createTextNode('سطح فعالی برای این نماد وجود ندارد'));
+  const hidden=read('hideTradeLevels',false);
+  btn(hidden?'نمایش روی نمودار':'مخفی کردن از نمودار',()=>{
+   save('hideTradeLevels',!hidden);redrawLayer();closeSheet();
+  });
+ },'پوزیشن‌ها و سفارش‌ها · '+marketSymbol);
+}
+const visibleNumber=new Intl.NumberFormat('fa',{maximumFractionDigits:1});
+const fallbackIntervals=['1m','5m','15m','30m','1h','2h','4h','6h','8h','12h','1d','3d','1w','1M'];
+let chartIntervals=fallbackIntervals;
+function visibleAtInterval(d, interval=timelineInterval) {
+ return !Array.isArray(d.config.intervals) || d.config.intervals.includes(interval);
+}
 function say(t){info.textContent=t}
 function btn(label,action,active=false){const el=document.createElement('button');el.textContent=label;if(active)el.classList.add('active');el.onclick=()=>{try{action()}catch(_){say('عملیات نمودار ناموفق بود')}};panel.append(el);return el}
 function menu(draw,title='تنظیمات'){panel.replaceChildren();$('sheettitle').textContent=title;panel.hidden=false;$('sheet').hidden=false;$('backdrop').hidden=false;draw();panel.scrollTop=0}
@@ -36,11 +80,31 @@ function checkField(label,value,parent=panel) {
  row.append(input,label);parent.append(row);return input;
 }
 function settingsMenu(d,name) {
- const c=config(d?.config || read('tool:'+name,defaults));
+ const preset=read('tool:'+name,null);
+ const c=config(d?.config || preset || defaults);
  const isFib=name==='fibonacciLine'||name==='fibChannel';
  const position=isPosition(name);
  const hasFill=position||isFib||['rectangleZone','priceRange','measureMove','priceChannelLine','parallelStraightLine'].includes(name);
  menu(()=>{
+  const tabs=document.createElement('div');tabs.className='settings-tabs tabs';tabs.setAttribute('role','tablist');
+  const pages={};panel.append(tabs);
+  const start=()=>panel.children.length;
+  function addTab(id,title,from){
+   const section=document.createElement('section');section.id='settings-'+id;section.setAttribute('role','tabpanel');
+   for(const node of Array.from(panel.children).slice(from))section.append(node);
+   panel.append(section);pages[id]=section;
+   const tab=document.createElement('button');tab.textContent=title;tab.setAttribute('role','tab');
+   tab.setAttribute('aria-controls',section.id);tab.dataset.tab=id;tab.onclick=()=>show(id);tabs.append(tab);
+  }
+  function show(id){
+   for(const [key,node] of Object.entries(pages))node.hidden=key!==id;
+   for(const tab of tabs.children){
+    const active=tab.dataset.tab===id;
+    tab.classList.toggle('active',active);tab.setAttribute('aria-selected',String(active));
+   }
+   panel.scrollTop=0;
+  }
+  const styleStart=start();
   const color=makeField('رنگ خط',c.color,'color');
   const width=makeField('ضخامت خط (۱ تا ۶)',c.width,'number');
   const style=choice('نوع خط',lineStyles,c.style);
@@ -49,8 +113,13 @@ function settingsMenu(d,name) {
   const riskColor=position ? makeField('رنگ حد ضرر',c.riskColor,'color') : null;
   const opacity=hasFill ? makeField('شفافیت رنگ (%)',Math.round(c.opacity*100),'number') : null;
   let fib=c.fib.map(x=>({...x}));
-  let reverse,left,right,prices,percents,labels;
+  let reverse,left,right,prices,percents,labels,trend,backgroundOn,labelFormat,labelOffset,labelSize;
   if(isFib) {
+   trend=checkField('خط پایه فیبوناچی',c.trend);
+   backgroundOn=checkField('رنگ پس‌زمینه بین سطوح',c.opacity>0);
+   labelFormat=choice('قالب نمایش سطح',[['percent','درصد'],['number','عدد اعشاری']],c.labelFormat);
+   labelOffset=choice('ارتفاع برچسب',[['above','بالای خط'],['below','پایین خط']],c.labelOffset);
+   labelSize=makeField('اندازه برچسب',c.labelSize,'number');
    reverse=checkField('معکوس',c.reverse);
    left=checkField('امتداد به چپ',c.extendLeft);
    right=checkField('امتداد به راست',c.extendRight);
@@ -90,15 +159,54 @@ function settingsMenu(d,name) {
    btn('افزودن سطح',()=>{if(fib.length<40){fib.push({v:'',on:true});renderFib();rows.lastElementChild.querySelector('input[type=number]').focus()}});
    btn('بازنشانی سطوح',()=>{fib=defaultFib.map(x=>({...x}));renderFib()});
   }
-  const makeDefault=d ? checkField('ذخیره به‌عنوان پیش‌فرض',false) : null;
+  addTab('style','ظاهر',styleStart);
+  const coordinatesStart=start();
+  const coordinates=[];
+  if(d){
+   d.points.forEach((p,i)=>{
+    const title=document.createElement('strong');
+    title.textContent=(position?['ورود','هدف','حد ضرر'][i]:'نقطه '+(i+1));panel.append(title);
+    const time=makeField('زمان '+(i+1)+' (UTC)',new Date(p.timestamp).toISOString().slice(0,23),'datetime-local');
+    time.step='0.001';
+    const price=makeField('قیمت '+(i+1),String(p.value),'number');price.step='any';
+    if(name==='verticalStraightLine')price.closest('label').hidden=true;
+    if(name==='horizontalStraightLine'||(position&&i===2))time.closest('label').hidden=true;
+    coordinates.push({time,price});
+   });
+   addTab('coordinates','مختصات',coordinatesStart);
+  }
+  const visibilityStart=start();
+  const initial=Array.isArray(c.intervals)?c.intervals:(d||preset?.intervals===null)?chartIntervals:[timelineInterval];
+  const intervalFields=new Map();
+  const currentOnly=btn('فقط '+timelineInterval,()=>pick([timelineInterval]));
+  currentOnly.dir='auto';
+  btn('همه تایم‌فریم‌ها',()=>pick(chartIntervals));
+  const group=document.createElement('div');group.className='interval-options';panel.append(group);
+  for(const interval of chartIntervals)intervalFields.set(interval,checkField(interval,initial.includes(interval),group));
+  function pick(values){for(const [interval,field] of intervalFields)field.checked=values.includes(interval);}
+  addTab('visibility','نمایش در تایم‌فریم',visibilityStart);
+  show('style');
+  const actions=document.createElement('div');actions.className='settings-actions';
+  const makeDefault=d ? checkField('ذخیره به‌عنوان پیش‌فرض',false,actions) : null;
   btn(d?'اعمال تغییرات':'ذخیره پیش‌فرض',()=>{
    const w=Number(width.value), alpha=opacity ? Number(opacity.value)/100 : c.opacity;
+   const intervals=chartIntervals.filter(i=>intervalFields.get(i).checked);
+   if(!intervals.length){show('visibility');say('حداقل یک تایم‌فریم انتخاب کنید');return}
+   const points=coordinates.map(({time,price})=>({timestamp:Date.parse(time.value+'Z'),value:price.valueAsNumber}));
+   if(points.some(p=>!Number.isFinite(p.timestamp)||!Number.isFinite(p.value))){
+    show('coordinates');say('زمان یا قیمت واردشده معتبر نیست');return;
+   }
+   if(position&&points.length===3)points[2].timestamp=points[1].timestamp;
+   if(isFib&&(!Number.isInteger(labelSize.valueAsNumber)||labelSize.valueAsNumber<9||labelSize.valueAsNumber>20)){
+    show('style');say('اندازه برچسب باید بین ۹ تا ۲۰ باشد');return;
+   }
    const badLevel=isFib&&fib.some(l=>String(l.v).trim()===''||!Number.isFinite(Number(l.v))||Math.abs(Number(l.v))>100||
     (l.width && (!Number.isFinite(Number(l.width))||Number(l.width)<1||Number(l.width)>6)));
    if(!Number.isFinite(w)||w<1||w>6||!Number.isFinite(alpha)||alpha<0||alpha>1||badLevel){
-    say('ضخامت، شفافیت یا سطح واردشده معتبر نیست');return;
+    show('style');say('ضخامت، شفافیت یا سطح واردشده معتبر نیست');return;
    }
-   const next={...c,color:color.value,width:w,style:style.value,background:background?.value||c.background,opacity:alpha};
+   const next={...c,color:color.value,width:w,style:style.value,background:background?.value||c.background,opacity:isFib&&!backgroundOn.checked?0:alpha,
+    intervals:intervals.length===chartIntervals.length?null:intervals};
    if(position) Object.assign(next,{targetColor:targetColor.value,riskColor:riskColor.value});
    if(isFib) Object.assign(next,{fib:fib.map(l=>{
     const level={...l,v:Number(l.v)};
@@ -106,17 +214,22 @@ function settingsMenu(d,name) {
     return level;
    }),
     reverse:reverse.checked,extendLeft:left.checked,extendRight:right.checked,
-    showPrice:prices.checked,showPercent:percents.checked,labels:labels.value});
+    showPrice:prices.checked,showPercent:percents.checked,labels:labels.value,trend:trend.checked,
+    labelFormat:labelFormat.value,labelOffset:labelOffset.value,labelSize:labelSize.valueAsNumber});
    if(!d||makeDefault.checked) save('tool:'+name,next);
-   if(d) changeDrawing(d,{config:next});
+   if(d){
+    changeDrawing(d,{config:next,points});
+    if(!visibleAtInterval(metadata(d.id)))selection(null);
+   }
    closeSheet();say('تنظیمات ذخیره شد');
   });
-  btn('بازگشت',d?closeSheet:drawMenu);
+  const apply=panel.lastElementChild;
+  actions.append(apply,btn('بازگشت',d?closeSheet:drawMenu));panel.append(actions);
  },toolLabel(name));
 }
 function objectMenu() {
  menu(()=>{
-  for(const d of drawings) btn(toolLabel(d.name)+(d.lock?' · قفل':'')+(d.visible?'':' · مخفی'),
+  for(const d of drawings) btn(toolLabel(d.name)+(d.lock?' · قفل':'')+(d.visible?(visibleAtInterval(d)?'':' · تایم‌فریم دیگر'):' · مخفی'),
    ()=>{selection(d.id);objectActions(d)},selected===d.id);
   if(!drawings.length) panel.append(document.createTextNode('هنوز ترسیمی روی نمودار نیست'));
  },'ترسیم‌ها');
@@ -124,6 +237,7 @@ function objectMenu() {
 function objectActions(d) {
  menu(()=>{
   btn('تنظیمات',()=>settingsMenu(d,d.name));
+ if(d.pane==='main'&&['horizontalStraightLine','horizontalRay'].includes(d.name))btn('هشدار روی این قیمت',()=>alertMenu(d.points[0].value));
   btn(d.lock?'باز کردن قفل':'قفل کردن',()=>{changeDrawing(d,{lock:!d.lock});closeSheet()});
   btn(d.visible?'مخفی کردن':'نمایش',()=>{changeDrawing(d,{visible:!d.visible});closeSheet()});
   btn('تکثیر',()=>{
@@ -355,9 +469,65 @@ function updateLevels(){
 function chooseLevel(kind){
  startPlacement('horizontalStraightLine');if(placement){placement.level=kind;say('قیمت مورد نظر را روی چارت لمس و رها کنید')}
 }
-function olderRequest(cb){
- if(pendingOlder||!more)return false;const data=chart.getDataList();if(!data.length)return false;
- pendingOlder=true;pendingCallback=cb||null;ChartNative.older(String(data[0].timestamp));say('در حال دریافت تاریخچه قدیمی‌تر…');return true
+let historyRetryAt=0;
+function olderRequest(callback, manual=false){
+ const first=chart.getDataList()[0];
+ if(!first||!window.ChartNative||(!manual&&Date.now()<historyRetryAt)||!more){
+  callback?.([],more);return false;
+ }
+ if(pendingOlder){
+  if(callback)pendingCallback=callback;
+  return true;
+ }
+ pendingOlder=true;pendingCallback=callback||null;
+ ChartNative.older(String(first.timestamp));say('در حال دریافت کندل‌های قدیمی‌تر…');
+ return true;
+}
+function updateHistoryBadge(){
+ const data=chart.getDataList(), range=chart.getVisibleRange();
+ const badge=$('history');
+ if(!data.length){badge.textContent='تاریخچه';return}
+ const first=data[Math.max(0,Math.min(data.length-1,range.from))];
+ const last=data[Math.max(0,Math.min(data.length-1,range.to-1))];
+ const days=(last.timestamp-first.timestamp)/86400000;
+ const count=range.to-range.from;
+ const label=days>=1?visibleNumber.format(days)+' روز':visibleNumber.format(count)+' کندل';
+ if(badge.textContent!==label)badge.textContent=label;
+ badge.title='تاریخچه · '+visibleNumber.format(data.length)+' کندل بارگیری شده';
+}
+function advanceHistoryRange(){
+ if(!historyRange)return;
+ const data=chart.getDataList();
+ if(!data.length)return;
+ if(data[0].timestamp>historyRange.timestamp&&more&&historyRange.pages<30){
+  if(!pendingOlder){historyRange.pages++;olderRequest(null,true)}
+  return;
+ }
+ const first=data.findIndex(b=>b.timestamp>=historyRange.timestamp);
+ const count=data.length-Math.max(0,first);
+ const pane=chart.getDom('candle_pane','main');
+ chart.setBarSpace(Math.max(1,Math.min(30,(pane.clientWidth-45)/Math.max(1,count))));
+ chart.scrollToRealTime();
+ const partial=data[0].timestamp>historyRange.timestamp;
+ say(partial?'تاریخچه موجود تا این نقطه بارگیری شد':
+  count>pane.clientWidth-45?'بازه بارگیری شد؛ برای دیدن کندل‌های قدیمی‌تر چارت را به راست بکشید':'');
+ historyRange=null;updateHistoryBadge();redrawLayer();
+}
+function historyMenu(){
+ menu(()=>{
+  const data=chart.getDataList();
+  if(!data.length){panel.append(document.createTextNode('در انتظار داده بازار'));return}
+  const date=t=>new Intl.DateTimeFormat('fa-IR',{dateStyle:'medium',timeStyle:'short',timeZone:'UTC'}).format(t);
+  const summary=document.createElement('p');summary.textContent=data.length.toLocaleString('fa')+' کندل بارگیری شده از '+date(data[0].timestamp);
+  panel.append(summary);
+  for(const [days,label] of [[1,'۱ روز'],[3,'۳ روز'],[7,'۷ روز'],[30,'۳۰ روز']])btn(label,()=>{
+   historyRange={timestamp:data[data.length-1].timestamp-days*86400000,pages:0};
+   closeSheet();advanceHistoryRange();
+  });
+  btn('دریافت کندل‌های قدیمی‌تر',()=>{
+   closeSheet();if(!olderRequest(null,true))say('تاریخچه قدیمی‌تری برای این نماد در دسترس نیست');
+  });
+ },'بازه و تاریخچه');
 }
 let nativeHeight=0,nativeWidth=0;
 function fitChart(hintHeight,hintWidth){
@@ -379,8 +549,8 @@ window.addEventListener('resize',scheduleFit);
 window.visualViewport?.addEventListener('resize',scheduleFit);
 window.SafeChart={
  fit:fitChart,
- init(symbol,interval,type,precision,allowLevels=true){
-  if(chart)return;timelineInterval=interval;pricePrecision=precision;levelsEnabled=allowLevels;chart=klinecharts.init('chart',{styles:read('appearance','dark'),timezone:'Etc/UTC',locale:'en-US'});
+ init(symbol,interval,type,precision,allowLevels=true,intervals=fallbackIntervals){
+  if(chart)return;marketSymbol=symbol;marketType=type;chartIntervals=intervals;timelineInterval=interval;pricePrecision=precision;levelsEnabled=allowLevels;chart=klinecharts.init('chart',{styles:read('appearance','dark'),timezone:'Etc/UTC',locale:'en-US'});
   if(!chart){say('موتور نمودار آماده نشد');return}
   chart.setPriceVolumePrecision(precision,6);chart.setOffsetRightDistance(Math.round(Math.max(56,Math.min(160,surface.clientWidth*.19))));
   for(const action of ['onScroll','onZoom','onDataReady','onVisibleRangeChange','onPaneDrag'])chart.subscribeAction(action,redrawLayer);
@@ -388,13 +558,19 @@ window.SafeChart={
   currentStyle=read('chartStyle','candle_solid');
   chartAppearance(read('appearance','dark'));
   for(const v of read('indicators',[{name:'VOL',params:[]}]))if(indicatorNames.includes(v.name))try{indicator(v.name,v.params||[],v)}catch(_){}
-  chart.setLoadDataCallback(({type,data,callback})=>{if(data && data.timestamp===chart.getDataList()[0]?.timestamp){if(!olderRequest(callback))callback([],more)}else callback([],false)});
+  chart.setLoadDataCallback(({type,data,callback})=>{
+   if(type==='forward'&&data)olderRequest(callback);
+   else callback([],false);
+  });
+  chart.subscribeAction('onVisibleRangeChange',()=>{
+   if(initialized)updateHistoryBadge();
+  });
   const resize=new ResizeObserver(scheduleFit);resize.observe($('toolbar'));refreshQuick();fitChart();setTimeout(fitChart,100);setTimeout(fitChart,500);say('آماده دریافت داده بیت‌یونیکس')
  },
  reset(data){
   if(!chart||!data.length)return;
-  more=data.length===200;chart.applyNewData(data,more);initialized=true;
-  updateLevels();fitChart();say('');
+  more=true;chart.applyNewData(data,more);initialized=true;
+  updateLevels();fitChart();updateHistoryBadge();say('');
  },
  sync(data) {
   if(!chart||!data.length)return;
@@ -419,19 +595,38 @@ window.SafeChart={
   redrawLayer();
  },
  tick(b){if(!chart||!initialized||!b)return;const d=chart.getDataList();if(d.length&&b.timestamp>=d[d.length-1].timestamp)chart.updateData(b);redrawLayer()},
- older(data,hasMore){if(!chart)return;more=hasMore;const cb=pendingCallback;pendingCallback=null;pendingOlder=false;if(cb)cb(data,hasMore);else if(data.length)chart.applyMoreData(data,hasMore);say(data.length?'':'تاریخچه بیشتری دریافت نشد');redrawLayer()},
- olderFailed(){const cb=pendingCallback;pendingCallback=null;pendingOlder=false;if(cb)cb([],true);say('دریافت تاریخچه ناموفق بود؛ دوباره امتحان کنید')},
+ older(data,hasMore){
+  if(!chart||!pendingOlder)return;
+  more=hasMore;historyRetryAt=0;
+  const callback=pendingCallback;pendingCallback=null;pendingOlder=false;
+  if(callback)callback(data,hasMore);
+  else chart.applyMoreData(data,hasMore);
+  if(!pendingOlder)say(data.length?'':'به ابتدای تاریخچهٔ موجود رسیدید');
+  updateHistoryBadge();redrawLayer();
+  setTimeout(advanceHistoryRange,0);
+ },
+ olderFailed(){
+  if(!pendingOlder)return;
+  const callback=pendingCallback;pendingCallback=null;pendingOlder=false;historyRange=null;
+  historyRetryAt=Date.now()+3000;
+  callback?.([],true);say('دریافت تاریخچه ناموفق بود. در منوی بازه دوباره تلاش کنید');
+ },
  precision(digits){if(chart){pricePrecision=digits;chart.setPriceVolumePrecision(digits,6);redrawLayer()}},
+ alertResult(message){say(message)},
+ marketLayers(alerts,levels,status){
+  chartAlerts=alerts;accountLevels=levels;accountStatus=status;redrawLayer();
+ },
  levels(e,s,t){levelValues=[e,s,t];updateLevels()}
 };
 $('ind').onclick=()=>{if(chart)indicatorMenu()};
 $('draw').onclick=()=>{if(chart)drawMenu()};
 $('options').onclick=()=>{if(!chart)return;menu(()=>{
  btn('ترسیم‌های ذخیره‌شده',objectMenu);
+ btn('پوزیشن‌ها و سفارش‌ها',positionsMenu);
  btn('نوع نمودار',()=>$('style').click());
  btn('قالب‌های تحلیل',()=>$('templates').click());
  if(levelsEnabled)btn('سطوح ورود / SL / TP',()=>$('levels').click());
- btn('دریافت تاریخچه قدیمی‌تر',()=>{closeSheet();$('more').click()});
+ btn('بازه و تاریخچه',historyMenu);
  btn(read('appearance','dark')==='dark'?'حالت روشن':'حالت تیره',()=>{
   const next=read('appearance','dark')==='dark'?'light':'dark';save('appearance',next);chartAppearance(next);closeSheet();fitChart()
  });
@@ -441,7 +636,7 @@ $('objects').onclick=()=>{if(chart)objectMenu()};
 $('templates').onclick=()=>{if(chart)templatesMenu()};
 $('style').onclick=()=>{if(!chart)return;menu(()=>{for(const [id,title] of [['candle_solid','کندل'],['candle_stroke','کندل توخالی'],['candle_up_stroke','صعودی توخالی'],['candle_down_stroke','نزولی توخالی'],['ohlc','OHLC'],['area','خطی']])btn(title,()=>{chart.setStyles({candle:{type:id}});currentStyle=id;save('chartStyle',id);closeSheet()},id===currentStyle);btn('بستن',()=>closeSheet())})};
 $('levels').onclick=()=>{if(!chart)return;menu(()=>{btn('قیمت ورود',()=>chooseLevel('entry'));btn('حد ضرر',()=>chooseLevel('sl'));btn('حد سود',()=>chooseLevel('tp'));btn('بستن',()=>closeSheet())})};
-$('more').onclick=()=>{if(chart&&!olderRequest(null))say('تاریخچه دیگری در دسترس نیست یا در حال دریافت است')};
+$('history').onclick=()=>{if(chart)historyMenu()};
 $('live').onclick=()=>chart?.scrollToRealTime();
 document.addEventListener('DOMContentLoaded',()=>{
  if(window.klinecharts&&window.ChartNative)ChartNative.ready();
@@ -457,3 +652,5 @@ function updateMagnet() {
  $('magnet').setAttribute('aria-pressed',String(!!magnet&&magnet!=='normal'));
 }
 document.addEventListener('DOMContentLoaded',updateMagnet);
+
+$('alert-price').onclick=()=>alertMenu();

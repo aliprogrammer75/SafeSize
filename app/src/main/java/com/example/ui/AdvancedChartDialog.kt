@@ -1,6 +1,14 @@
 package com.example.ui
 
+import android.Manifest
 import android.annotation.SuppressLint
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -12,6 +20,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -32,18 +41,29 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.math.RoundingMode
+import java.math.BigDecimal
+import java.util.UUID
 
 private const val chartUrl = "https://appassets.androidplatform.net/assets/chart/index.html"
 private fun candlesJson(bars: List<Candle>)=JSONArray().apply {
     bars.forEach { b -> put(JSONObject().put("timestamp",b.time).put("open",b.open).put("high",b.high).put("low",b.low).put("close",b.close).put("volume",b.volume)) }
 }.toString()
-private class ChartBridge(private val ready:()->Unit,private val older:(Long)->Unit,private val select:(String,String)->Unit){
+private class ChartBridge(
+    private val ready: () -> Unit,
+    private val older: (Long) -> Unit,
+    private val select: (String, String) -> Unit,
+    private val alert: (String, BigDecimal) -> Unit
+) {
     @JavascriptInterface fun ready(){ready.invoke()}
     @JavascriptInterface fun older(timestamp:String){timestamp.toLongOrNull()?.takeIf{it>0}?.let(older)}
     @JavascriptInterface fun select(kind:String,value:String){if(kind in setOf("entry","sl","tp") && value.length<64)select.invoke(kind,value)}
+    @JavascriptInterface fun createAlert(condition: String, price: String) {
+        if (condition !in setOf("ABOVE", "BELOW") || !price.matches(Regex("[0-9]{1,20}(\\.[0-9]{1,16})?"))) return
+        price.toBigDecimalOrNull()?.takeIf { it.signum() > 0 }?.let { alert(condition, it) }
+    }
 }
 @Composable
-fun AdvancedChartDialog(
+internal fun AdvancedChartDialog(
     symbol: String,
     initialInterval: String,
     precision: Int,
@@ -53,7 +73,9 @@ fun AdvancedChartDialog(
     onDismiss: () -> Unit,
     onSelect: (String, String) -> Unit,
     symbols: Map<String, Int> = emptyMap(),
-    allowLevels: Boolean = true
+    allowLevels: Boolean = true,
+    demoChart: Boolean = false,
+    demoLevels: List<ChartTradeLevel> = emptyList()
 ) {
     var activeSymbol by rememberSaveable(symbol) { mutableStateOf(symbol) }
     var interval by rememberSaveable(initialInterval) { mutableStateOf(initialInterval) }
@@ -132,10 +154,12 @@ fun AdvancedChartDialog(
                     ) { Text("×", style = MaterialTheme.typography.headlineSmall) }
                 }
                 val calculatorLinked = activeSymbol == symbol && allowLevels
-                key(activeSymbol, interval, type) {
+                key(activeSymbol, interval, type, calculatorLinked) {
                     AdvancedChart(
                         activeSymbol, interval, type, symbolsByName[activeSymbol] ?: precision,
-                        entry, stop, target, calculatorLinked, onSelect, Modifier.weight(1f).fillMaxWidth()
+                        entry, stop, target, calculatorLinked, onSelect, demoChart,
+                        if (activeSymbol == symbol) demoLevels else emptyList(),
+                        Modifier.weight(1f).fillMaxWidth()
                     )
                 }
             }
@@ -143,7 +167,13 @@ fun AdvancedChartDialog(
     }
 }
 @SuppressLint("SetJavaScriptEnabled")
-@Composable private fun AdvancedChart(symbol:String,interval:String,type:String,precision:Int,entry:String,stop:String,target:String,calculatorLinked:Boolean,onSelect:(String,String)->Unit,modifier:Modifier){
+@Composable private fun AdvancedChart(
+    symbol: String, interval: String, type: String, precision: Int, entry: String, stop: String,
+    target: String, calculatorLinked: Boolean, onSelect: (String, String) -> Unit,
+    demoChart: Boolean, demoLevels: List<ChartTradeLevel>, modifier: Modifier
+) {
+    val context = LocalContext.current.applicationContext
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
     val scope=rememberCoroutineScope()
     val currentSelect by rememberUpdatedState(onSelect)
     val currentPrecision by rememberUpdatedState(precision.coerceIn(0, 16))
@@ -153,7 +183,89 @@ fun AdvancedChartDialog(
     var status by remember{mutableStateOf("دریافت تاریخچه")}
     var oldest by remember{mutableStateOf(0L)}
     var lastClosed by remember{mutableStateOf(0L)}
+    var pendingPermissionRule by remember { mutableStateOf<WatchRule?>(null) }
+    var alertRevision by remember { mutableIntStateOf(0) }
+    var alerts by remember { mutableStateOf<List<WatchRule>>(emptyList()) }
+    var snapshot by remember { mutableStateOf(ChartTradeSnapshot(emptyList())) }
+    val positionReader = remember { BitunixChartPositions() }
     fun js(script:String){web?.evaluateJavascript(script,null)}
+    fun alertResult(message: String) = js("window.SafeChart.alertResult(${JSONObject.quote(message)})")
+    fun addAlert(rule: WatchRule) {
+        if (!WatchStore.add(context, rule)) {
+            alertResult("هشدار ذخیره نشد. حداکثر ۳۰ هشدار در رصد بازار نگه‌داری می‌شود")
+            return
+        }
+        WatchStore.setEnabled(context, true)
+        alertRevision++
+        alertResult("هشدار قیمت ثبت شد")
+    }
+    val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val rule = pendingPermissionRule
+        pendingPermissionRule = null
+        if (granted && rule != null) addAlert(rule)
+        else if (rule != null) alertResult("برای ثبت هشدار، مجوز اعلان را فعال کنید")
+    }
+    fun createAlert(condition: String, price: BigDecimal) {
+        val value = price.setScale(currentPrecision, RoundingMode.HALF_UP).stripTrailingZeros()
+        if (value.signum() <= 0) {
+            alertResult("قیمت هشدار با دقت این نماد معتبر نیست")
+            return
+        }
+        val rule = WatchRule(UUID.randomUUID().toString(), symbol, condition, value.toPlainString(), "",
+            interval, "", emptyList(), priceType = type)
+        if (Build.VERSION.SDK_INT >= 33 &&
+            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            if (pendingPermissionRule == null) {
+                pendingPermissionRule = rule
+                notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        } else addAlert(rule)
+    }
+    LaunchedEffect(ready, alertRevision) {
+        if (!ready) return@LaunchedEffect
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (isActive) {
+                alerts = WatchStore.read(context).filter { it.active && it.symbol == symbol && it.priceType == type }
+                delay(1500)
+            }
+        }
+    }
+    LaunchedEffect(ready, demoChart) {
+        if (!ready || demoChart) return@LaunchedEffect
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            val vault = BitunixVault(context)
+            while (isActive) {
+                snapshot = try {
+                    val credentials = withContext(Dispatchers.IO) { vault.load() }
+                    if (credentials == null) ChartTradeSnapshot(emptyList(), "حساب Bitunix متصل نیست")
+                    else positionReader.read(credentials, symbol)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    ChartTradeSnapshot(emptyList(), "دریافت پوزیشن‌های Bitunix ناموفق بود")
+                }
+                delay(12000)
+            }
+        }
+    }
+    LaunchedEffect(ready, alerts, snapshot, demoLevels, demoChart) {
+        if (!ready) return@LaunchedEffect
+        val levels = if (demoChart) demoLevels else snapshot.levels
+        val lines = JSONArray().apply { levels.forEach { put(it.toJson()) } }
+        val alarms = JSONArray().apply {
+            alerts.filter { it.type in setOf("ABOVE", "BELOW", "CLOSE_ABOVE", "CLOSE_BELOW") }.forEach {
+                val threshold=it.low.toDoubleOrNull()
+                if (threshold != null && threshold.isFinite() && threshold>0) {
+                    val direction = if (it.type.endsWith("ABOVE")) "↑" else "↓"
+                    val label = if (it.type.startsWith("CLOSE")) "هشدار بسته‌شدن ${it.interval} $direction" else "هشدار $direction"
+                    put(JSONObject().put("price", threshold).put("label", label))
+                }
+            }
+        }
+        val status = if (demoChart) "حساب تمرینی" else snapshot.status
+        js("window.SafeChart.marketLayers($alarms,$lines,${JSONObject.quote(status)})")
+    }
     fun fit(v:WebView){
         val density=v.resources.displayMetrics.density
         if(v.height>0 && v.width>0 && density>0){
@@ -172,7 +284,7 @@ fun AdvancedChartDialog(
             try{
                 val list=MarketData.candles(symbol,interval,type,timestamp,200).filter{it.time<timestamp}
                 if(list.isNotEmpty())oldest=list.first().time
-                js("window.SafeChart.older("+candlesJson(list)+","+(list.size==200)+")")
+                js("window.SafeChart.older("+candlesJson(list)+","+list.isNotEmpty()+")")
             }catch(e:CancellationException){throw e}catch(_:Exception){js("window.SafeChart.olderFailed()")}
             finally{loadingOlder=false}
         }
@@ -181,7 +293,8 @@ fun AdvancedChartDialog(
     LaunchedEffect(ready){
         if(!ready)return@LaunchedEffect
         val market = listOf(symbol, interval, type).joinToString(",") { JSONObject.quote(it) }
-        js("window.SafeChart.init($market,$currentPrecision,$calculatorLinked)")
+        val intervals = JSONArray(MarketData.intervals)
+        js("window.SafeChart.init($market,$currentPrecision,$calculatorLinked,$intervals)")
         while(isActive){
             try{
                 val bars=MarketData.candles(symbol,interval,type,null,200)
@@ -212,6 +325,7 @@ fun AdvancedChartDialog(
                         }
                         if(live.eventTime>=start && live.eventTime<MarketLive.nextOpen(start,interval)){
                             js("window.SafeChart.tick("+candlesJson(listOf(Candle(start,live.open,live.high,live.low,live.close,live.volume)))+"[0])")
+                            MarketMonitor.observeChartPrice(context, symbol, type, BigDecimal.valueOf(live.close))
                             status=""
                         }
                     }
@@ -249,7 +363,8 @@ fun AdvancedChartDialog(
                     {kind,value->scope.launch{
                         val n=value.toBigDecimalOrNull()
                         if(calculatorLinked && n!=null && n.signum()>0)currentSelect(kind,n.setScale(currentPrecision,RoundingMode.HALF_UP).stripTrailingZeros().toPlainString())
-                    }}
+                    }},
+                    {condition, price -> scope.launch { createAlert(condition, price) }}
                 ),"ChartNative")
                 webViewClient=object:WebViewClient(){
                     override fun onPageFinished(view:WebView,url:String){

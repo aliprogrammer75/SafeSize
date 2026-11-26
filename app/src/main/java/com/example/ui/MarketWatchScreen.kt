@@ -58,7 +58,7 @@ fun MarketWatchScreen(){
             Card{
                 Column(Modifier.fillMaxWidth().padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
                     Text(r.symbol+" • "+r.strategy.ifBlank{"بدون نام"},style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Bold)
-                    Text(when(r.type){"ABOVE"->"قیمت بالاتر یا مساوی ";"BELOW"->"قیمت پایین‌تر یا مساوی ";"ZONE"->"محدوده "; "CLOSE_ABOVE"->"بسته شدن کندل بالای ";else->"بسته شدن کندل پایین "}+r.low+(if(r.type=="ZONE")" تا "+r.high else "")+" • "+r.interval)
+                    Text(when(r.type){"ABOVE"->"قیمت بالاتر یا مساوی ";"BELOW"->"قیمت پایین‌تر یا مساوی ";"ZONE"->"محدوده "; "CLOSE_ABOVE"->"بسته شدن کندل بالای ";else->"بسته شدن کندل پایین "}+r.low+(if(r.type=="ZONE")" تا "+r.high else "")+" • "+r.interval+" · "+(if(r.priceType=="MARK_PRICE") "Mark" else "Last"))
                     Text("آخرین قیمت: "+r.lastPrice.ifBlank{"—"})
                     Text(if(r.hitAt>0)"هشدار صادر شد" else if(r.active)"در انتظار" else "متوقف",color=if(r.hitAt>0)MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant)
                     if(r.checklist.isNotEmpty()){

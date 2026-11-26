@@ -22,7 +22,7 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.net.ssl.HttpsURLConnection
 
 internal data class BitunixCredentials(val apiKey: String, val secret: String, val passphrase: String = "")
-internal data class BitunixPosition(val symbol: String, val side: String, val leverage: String, val entry: String, val margin: String, val pnl: String, val id: String, val qty: String, val mode: String)
+internal data class BitunixPosition(val symbol: String, val side: String, val leverage: String, val entry: String, val margin: String, val pnl: String, val id: String, val qty: String, val mode: String, val openedAt: Long = 0)
 internal data class BitunixSnapshot(val available: String, val margin: String, val frozen: String, val crossPnl: String, val isolatedPnl: String, val positions: List<BitunixPosition>, val fetchedAt: Long)
 
 internal class BitunixApiException(val code: Int, val stage: String = "", val http: Boolean = false) : Exception("Bitunix API error")
@@ -76,7 +76,7 @@ internal object BitunixClient {
     private fun sha(value: String) = hex(MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8)))
     // Fixed endpoint allowlist; no withdrawal or transfer routes.
     private fun get(credentials: BitunixCredentials, path: String, query: String, canonical: String, body: String? = null): JSONObject {
-        require(path in setOf("/api/v1/futures/tpsl/get_history_orders", "/api/v1/futures/account/position_mode", "/api/v1/futures/position/get_history_positions", "/api/v1/futures/account", "/api/v1/futures/position/get_pending_positions", "/api/v1/futures/account/get_leverage_margin_mode", "/api/v1/futures/trade/get_pending_orders", "/api/v1/futures/market/trading_pairs", "/api/v1/futures/trade/get_order_detail", "/api/v1/futures/trade/place_order", "/api/v1/futures/trade/flash_close_position", "/api/v1/futures/trade/cancel_orders"))
+        require(path in setOf("/api/v1/futures/tpsl/get_pending_orders", "/api/v1/futures/trade/get_history_trades", "/api/v1/futures/tpsl/get_history_orders", "/api/v1/futures/account/position_mode", "/api/v1/futures/position/get_history_positions", "/api/v1/futures/account", "/api/v1/futures/position/get_pending_positions", "/api/v1/futures/account/get_leverage_margin_mode", "/api/v1/futures/trade/get_pending_orders", "/api/v1/futures/market/trading_pairs", "/api/v1/futures/trade/get_order_detail", "/api/v1/futures/trade/place_order", "/api/v1/futures/trade/flash_close_position", "/api/v1/futures/trade/cancel_orders"))
         require(if (body == null) !path.endsWith("/place_order") && !path.endsWith("/flash_close_position") && !path.endsWith("/cancel_orders") else path.endsWith("/place_order") || path.endsWith("/flash_close_position") || path.endsWith("/cancel_orders"))
         val nonce = hex(ByteArray(8).also { random.nextBytes(it) })
         val timestamp = System.currentTimeMillis().toString()
@@ -142,13 +142,17 @@ internal object BitunixClient {
                 .also { if (listOf(it.available, it.margin, it.frozen, it.crossPnl, it.isolatedPnl).any { value -> value.toBigDecimalOrNull() == null }) throw BitunixConnectionException("دریافت موجودی", "ACCOUNT_SCHEMA") }
         } catch (e: org.json.JSONException) { throw BitunixConnectionException("دریافت موجودی", "ACCOUNT_SCHEMA") }
     }
-    suspend fun fetchPositions(credentials: BitunixCredentials): List<BitunixPosition> = withContext(Dispatchers.IO) {
-        val result = get(credentials, "/api/v1/futures/position/get_pending_positions", "?includeSubAccounts=false", "includeSubAccountsfalse")
+    suspend fun fetchPositions(credentials: BitunixCredentials, symbol: String? = null): List<BitunixPosition> = withContext(Dispatchers.IO) {
+        require(symbol == null || validSymbol(symbol))
+        val result = get(credentials, "/api/v1/futures/position/get_pending_positions",
+            "?includeSubAccounts=false" + (symbol?.let { "&symbol=$it" } ?: ""),
+            "includeSubAccountsfalse" + (symbol?.let { "symbol$it" } ?: ""))
+
         try {
             val data = result.getJSONArray("data")
             (0 until data.length()).map { i ->
                 val p = data.getJSONObject(i)
-                BitunixPosition(p.getString("symbol"), p.getString("side"), p.getString("leverage"), p.getString("avgOpenPrice"), p.getString("margin"), p.getString("unrealizedPNL"), p.getString("positionId"), p.getString("qty"), p.getString("positionMode"))
+                BitunixPosition(p.getString("symbol"), p.getString("side"), p.getString("leverage"), p.getString("avgOpenPrice"), p.getString("margin"), p.getString("unrealizedPNL"), p.getString("positionId"), p.getString("qty"), p.getString("positionMode"), p.optLong("ctime", 0))
             }
         } catch (e: org.json.JSONException) { throw BitunixConnectionException("دریافت پوزیشن‌ها", "POSITIONS_SCHEMA") }
     }
@@ -251,6 +255,37 @@ internal object BitunixClient {
             BitunixOrder(o.getString("orderId"), o.getString("symbol"), o.getString("qty"), o.optString("status"))
         }
     }
+    private suspend fun chartOrders(
+        credentials: BitunixCredentials, endpoint: String, symbol: String, positionId: String? = null,
+        listKey: String? = null
+    ): List<JSONObject> = withContext(Dispatchers.IO) {
+        require(validSymbol(symbol) && (positionId == null || positionId.matches(Regex("[0-9]{1,32}"))))
+        val orders = mutableListOf<JSONObject>()
+        for (skip in 0..100 step 100) {
+            val httpPosition = positionId?.let { "&positionId=$it" } ?: ""
+            val signPosition = positionId?.let { "positionId$it" } ?: ""
+            val response = get(credentials, endpoint, "?limit=100$httpPosition&skip=$skip&symbol=$symbol",
+                "limit100${signPosition}skip${skip}symbol$symbol")
+            val data = response.get("data")
+            val page = if (listKey == null) data as JSONArray else (data as JSONObject).getJSONArray(listKey)
+            for (i in 0 until page.length()) {
+                val row = page.getJSONObject(i)
+                if (row.optString("symbol") == symbol) orders.add(row)
+            }
+            if (page.length() < 100 || (data is JSONObject && skip + page.length() >= data.optInt("total", Int.MAX_VALUE))) break
+        }
+        orders
+    }
+
+    suspend fun chartPendingOrders(c: BitunixCredentials, symbol: String) =
+        chartOrders(c, "/api/v1/futures/trade/get_pending_orders", symbol, listKey = "orderList")
+
+    suspend fun chartProtectionOrders(c: BitunixCredentials, symbol: String) =
+        chartOrders(c, "/api/v1/futures/tpsl/get_pending_orders", symbol)
+
+    suspend fun chartFills(c: BitunixCredentials, position: BitunixPosition) =
+        chartOrders(c, "/api/v1/futures/trade/get_history_trades", position.symbol, position.id, "tradeList")
+
     suspend fun cancel(c: BitunixCredentials, order: BitunixOrder) = withContext(Dispatchers.IO) {
         require(validSymbol(order.symbol) && order.id.isNotBlank())
         val body = JSONObject().put("symbol", order.symbol).put("orderList", JSONArray().put(JSONObject().put("orderId", order.id)))
