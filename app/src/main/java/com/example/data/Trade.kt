@@ -3,6 +3,7 @@ package com.example.data
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
+@kotlinx.serialization.Serializable
 @Entity(tableName = "trades")
 data class Trade(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,

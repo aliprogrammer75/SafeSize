@@ -42,6 +42,7 @@ import androidx.navigation.compose.rememberNavController
 import com.example.ui.DashboardScreen
 import com.example.ui.ExchangeHubScreen
 import com.example.ui.RiskStudioScreen
+import com.example.ui.ProductToolsScreen
 import androidx.compose.material3.TextButton
 import com.example.ui.BitunixTradingScreen
 import com.example.ui.TradeAnalyticsScreen
@@ -80,7 +81,7 @@ fun MainScreen() {
                         Text("SafeSize", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                         Text("مدیریت ریسک و معاملات", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    TextButton(onClick = { navController.navigate("risk") { launchSingleTop = true } }) { Text("محافظ سرمایه") }
+                    TextButton(onClick = { navController.navigate("tools") { launchSingleTop = true } }) { Text("ابزارها") }
                 }
             }
         },
@@ -129,6 +130,7 @@ fun MainScreen() {
             composable("exchange") { ExchangeHubScreen(onTrade = { navController.navigate("bitunix-trade") }) }
             composable("bitunix-trade") { BitunixTradingScreen() }
             composable("risk") { RiskStudioScreen(viewModel) }
+            composable("tools") { ProductToolsScreen(viewModel, onRisk = { navController.navigate("risk") }) }
         }
     }
 }

@@ -44,7 +44,13 @@ fun ExchangeHubScreen(onTrade: () -> Unit) {
                 BitunixAccountCard()
                 Button(onClick = onTrade, modifier = Modifier.fillMaxWidth()) { Text("مدیریت سفارش‌های Bitunix") }
                 ExchangeJournal()
-            } else OtherAccount(selected)
+            } else {
+                OtherAccount(selected)
+                if (selected == "weex") {
+                    WeexTradingCard()
+                    ExchangeJournal("weex")
+                }
+            }
         }
     }
 }
@@ -78,7 +84,7 @@ private fun OtherAccount(exchange: String) {
     LaunchedEffect(Unit) { refresh() }
     Card {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(if (exchange == "weex") "حساب WEEX • فقط خواندنی" else "LBank • اتصال آزمایشی", style = MaterialTheme.typography.titleLarge)
+            Text(if (exchange == "weex") "حساب WEEX" else "LBank • اتصال آزمایشی", style = MaterialTheme.typography.titleLarge)
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
             data?.let { a ->
@@ -108,12 +114,12 @@ private fun OtherAccount(exchange: String) {
                     TextButton(onClick = { disconnect = true }, enabled = !busy) { Text("حذف کلید") }
                 }
             }
-            Text("ثبت سفارش در این اتصال فعلاً فعال نیست.", style = MaterialTheme.typography.bodySmall)
+            Text(if (exchange == "weex") "برای ثبت سفارش، مجوز Futures Trade ضروری است. برداشت و انتقال را فعال نکنید." else "ثبت سفارش در این اتصال فعال نیست.", style = MaterialTheme.typography.bodySmall)
         }
     }
     if (edit) {
         var api by remember { mutableStateOf("") }; var secret by remember { mutableStateOf("") }; var pass by remember { mutableStateOf("") }
-        AlertDialog(onDismissRequest = { if (!busy) edit = false }, title = { Text("کلید API فقط خواندنی") }, text = {
+        AlertDialog(onDismissRequest = { if (!busy) edit = false }, title = { Text("اتصال کلید API") }, text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (exchange == "lbank") Text("کلید HmacSHA256 فیوچرز؛ این اتصال آزمایشی است.")
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
@@ -167,7 +173,7 @@ private fun csvField(raw: String): String {
 }
 
 @Composable
-private fun ExchangeJournal() {
+private fun ExchangeJournal(exchange: String = "bitunix") {
     val context = LocalContext.current.applicationContext
     val scope = rememberCoroutineScope()
     val prefs = remember { context.getSharedPreferences("exchange_journal_v1", 0) }
@@ -197,8 +203,8 @@ private fun ExchangeJournal() {
         } else exportText = ""
     }
     suspend fun loadLocal(): BitunixCredentials? {
-        val c = withContext(Dispatchers.IO) { BitunixVault(context).load() }
-        val tag = c?.let { accountTag(it.apiKey) } ?: ""
+        val c = withContext(Dispatchers.IO) { BitunixVault(context, exchange).load() }
+        val tag = c?.let { if (exchange == "bitunix") accountTag(it.apiKey) else accountTag(exchange + ":" + it.apiKey) } ?: ""
         if (tag != owner) {
             owner = tag
             entries = if (tag.isBlank()) emptyList() else decodeHistory(prefs.getString(tag + "_history", "[]") ?: "[]")
@@ -217,8 +223,8 @@ private fun ExchangeJournal() {
     val sum = pnl.fold(BigDecimal.ZERO) { a, b -> a + b }
     Card {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("ژورنال صرافی Bitunix", style = MaterialTheme.typography.titleLarge)
-            Text("تاریخچه ذخیره‌شده روی گوشی؛ حداکثر ۵۰۰ رکورد اخیر. سود خام قبل از کارمزد و فاندینگ.")
+            Text(if (exchange == "weex") "ژورنال اجرای معاملات WEEX" else "ژورنال صرافی Bitunix", style = MaterialTheme.typography.titleLarge)
+            Text(if (exchange == "weex") "۱۰۰ اجرای اخیر در ۷ روز گذشته؛ هر اجرا یک رکورد است، نه یک معامله کامل. فاندینگ دریافت نمی‌شود." else "تاریخچه ذخیره‌شده روی گوشی؛ حداکثر ۵۰۰ رکورد اخیر. سود خام قبل از کارمزد و فاندینگ.")
             if (lastSync > 0) Text("آخرین دریافت: " + DateFormat.getDateTimeInstance().format(Date(lastSync)), style = MaterialTheme.typography.labelSmall)
             Button(enabled = !busy, onClick = {
                 busy = true; status = ""
@@ -226,9 +232,9 @@ private fun ExchangeJournal() {
                     try {
                         val c = loadLocal() ?: error("ابتدا حساب را متصل کنید")
                         val tag = owner
-                        val fresh = BitunixClient.history(c)
-                        val current = withContext(Dispatchers.IO) { BitunixVault(context).load() }
-                        require(current != null && accountTag(current.apiKey) == tag)
+                        val fresh = if (exchange == "weex") ExchangeReadClient.weexHistory(c) else BitunixClient.history(c)
+                        val current = withContext(Dispatchers.IO) { BitunixVault(context, exchange).load() }
+                        require(current != null && (if (exchange == "bitunix") accountTag(current.apiKey) else accountTag(exchange + ":" + current.apiKey)) == tag)
                         entries = (fresh + entries).distinctBy { it.id }.sortedByDescending { it.time }.take(500)
                         lastSync = System.currentTimeMillis()
                         prefs.edit().putString(tag + "_history", encodeHistory(entries)).putLong(tag + "_sync", lastSync).apply()
@@ -257,10 +263,10 @@ private fun ExchangeJournal() {
                             val rows = mutableListOf("exchange,symbol,side,realized_pnl_before_fees,funding,fee,updated_at_ms,position_id,strategy,note")
                             shown.forEach { e ->
                                 val n = notes[e.id]
-                                rows.add(listOf("Bitunix", e.symbol, e.side, e.pnl, e.funding, e.fee, e.time.toString(), e.id, n?.strategy ?: "", n?.note ?: "").joinToString(",") { csvField(it) })
+                                rows.add(listOf(exchange, e.symbol, e.side, e.pnl, e.funding, e.fee, e.time.toString(), e.id, n?.strategy ?: "", n?.note ?: "").joinToString(",") { csvField(it) })
                             }
                             exportText = "\uFEFF" + rows.joinToString("\r\n")
-                            export.launch("SafeSize-Bitunix.csv")
+                            export.launch("SafeSize-" + exchange + ".csv")
                         } catch (e: CancellationException) { throw e }
                         catch (_: Exception) { status = "حساب تغییر کرده یا خروجی ناموفق است"; exportText = "" }
                     }
