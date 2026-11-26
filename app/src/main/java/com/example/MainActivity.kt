@@ -40,6 +40,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.ui.DashboardScreen
+import com.example.ui.MarketPlannerScreen
+import com.example.ui.MarketWatchScreen
 import com.example.ui.ExchangeHubScreen
 import com.example.ui.RiskStudioScreen
 import com.example.ui.ProductToolsScreen
@@ -81,7 +83,10 @@ fun MainScreen() {
                         Text("SafeSize", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                         Text("مدیریت ریسک و معاملات", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    TextButton(onClick = { navController.navigate("tools") { launchSingleTop = true } }) { Text("ابزارها") }
+                    Column {
+                        TextButton(onClick = { navController.navigate("watch") { launchSingleTop = true } }) { Text("رصد بازار") }
+                        TextButton(onClick = { navController.navigate("tools") { launchSingleTop = true } }) { Text("ابزارها") }
+                    }
                 }
             }
         },
@@ -124,7 +129,9 @@ fun MainScreen() {
             modifier = Modifier.padding(innerPadding)
         ) {
             composable("dashboard") { DashboardScreen(viewModel) }
-            composable("calculator") { TradeCalculatorScreen(viewModel) }
+            composable("calculator") { MarketPlannerScreen(onManual = { navController.navigate("manual-calculator") }, onWatch = { navController.navigate("watch") }) }
+            composable("manual-calculator") { TradeCalculatorScreen(viewModel) }
+            composable("watch") { MarketWatchScreen() }
             composable("journal") { TradeJournalScreen(viewModel) }
             composable("analytics") { TradeAnalyticsScreen(viewModel) }
             composable("exchange") { ExchangeHubScreen(onTrade = { navController.navigate("bitunix-trade") }) }

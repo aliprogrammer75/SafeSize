@@ -76,7 +76,7 @@ internal object BitunixClient {
     private fun sha(value: String) = hex(MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8)))
     // Fixed endpoint allowlist; no withdrawal or transfer routes.
     private fun get(credentials: BitunixCredentials, path: String, query: String, canonical: String, body: String? = null): JSONObject {
-        require(path in setOf("/api/v1/futures/position/get_history_positions", "/api/v1/futures/account", "/api/v1/futures/position/get_pending_positions", "/api/v1/futures/account/get_leverage_margin_mode", "/api/v1/futures/trade/get_pending_orders", "/api/v1/futures/market/trading_pairs", "/api/v1/futures/trade/get_order_detail", "/api/v1/futures/trade/place_order", "/api/v1/futures/trade/flash_close_position", "/api/v1/futures/trade/cancel_orders"))
+        require(path in setOf("/api/v1/futures/tpsl/get_history_orders", "/api/v1/futures/account/position_mode", "/api/v1/futures/position/get_history_positions", "/api/v1/futures/account", "/api/v1/futures/position/get_pending_positions", "/api/v1/futures/account/get_leverage_margin_mode", "/api/v1/futures/trade/get_pending_orders", "/api/v1/futures/market/trading_pairs", "/api/v1/futures/trade/get_order_detail", "/api/v1/futures/trade/place_order", "/api/v1/futures/trade/flash_close_position", "/api/v1/futures/trade/cancel_orders"))
         require(if (body == null) !path.endsWith("/place_order") && !path.endsWith("/flash_close_position") && !path.endsWith("/cancel_orders") else path.endsWith("/place_order") || path.endsWith("/flash_close_position") || path.endsWith("/cancel_orders"))
         val nonce = hex(ByteArray(8).also { random.nextBytes(it) })
         val timestamp = System.currentTimeMillis().toString()
@@ -171,6 +171,27 @@ internal object BitunixClient {
         }
         result.distinctBy { it.id }.sortedByDescending { it.time }
     }
+    suspend fun triggeredOrders(c: BitunixCredentials, since: Long): List<TriggerNotice> = withContext(Dispatchers.IO) {
+        val result = mutableListOf<TriggerNotice>()
+        for (page in 0 until 5) {
+            val skip = page * 100
+            val query = "?limit=100&skip=" + skip + "&startTime=" + since
+            val data = get(c, "/api/v1/futures/tpsl/get_history_orders", query, "limit100skip" + skip + "startTime" + since).opt("data")
+            val rows = when (data) {
+                is JSONObject -> data.getJSONArray("orderList")
+                is JSONArray -> data
+                else -> error("TP/SL schema")
+            }
+            for (i in 0 until rows.length()) {
+                val row = rows.getJSONObject(i)
+                val status = row.getString("status")
+                val time = row.optLong("triggerTime", 0)
+                if (status == "FILLED" && time >= since) result.add(TriggerNotice(row.getString("id"), row.getString("symbol"), time))
+            }
+            if (rows.length() < 100) break
+        }
+        result.distinctBy { it.id + ":" + it.time }
+    }
     private fun validSymbol(s: String) = s.matches(Regex("[A-Z0-9]{2,20}USDT"))
     private fun positive(s: String): BigDecimal {
         require(s.matches(Regex("[0-9]{1,16}(\\.[0-9]{1,16})?"))) { "عدد نامعتبر است" }
@@ -195,7 +216,7 @@ internal object BitunixClient {
             require(tp == null || if (draft.side == "BUY") tp > price else tp < price) { "جهت حد سود نادرست است" }
         }
         val account = accountFrom(get(c, "/api/v1/futures/account", "?marginCoin=USDT", "marginCoinUSDT"))
-        val mode = account.getString("positionMode")
+        val mode = get(c, "/api/v1/futures/account/position_mode", "", "").getJSONObject("data").getString("positionMode")
         require(mode in setOf("ONE_WAY", "HEDGE")) { "حالت حساب ناشناخته است" }
         val settings = get(c, "/api/v1/futures/account/get_leverage_margin_mode", "?marginCoin=USDT&symbol=" + draft.symbol, "marginCoinUSDTsymbol" + draft.symbol).getJSONObject("data")
         BitunixPreview(draft, mode, settings.getInt("leverage"), settings.getString("marginMode"), account.getString("available"), UUID.randomUUID().toString().replace("-", ""), System.currentTimeMillis())
