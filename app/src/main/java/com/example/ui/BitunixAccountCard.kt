@@ -147,7 +147,7 @@ fun BitunixAccountCard() {
                                 Text("سود/زیان باز", style = MaterialTheme.typography.bodySmall)
                                 LtrAmount(p.pnl, pnlColor(p.pnl))
                             }
-                            Text("ورود: " + p.entry + " | مارجین: " + p.margin, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("ورود: " + p.entry + " | مارجین: " + money(p.margin), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
@@ -216,7 +216,7 @@ fun BitunixAccountCard() {
 
 @Composable private fun LtrAmount(value: String, color: androidx.compose.ui.graphics.Color, large: Boolean = false) {
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-        Text(value.toBigDecimalOrNull()?.stripTrailingZeros()?.toPlainString() ?: "—", color = color,
+        Text(money(value), color = color,
             style = if (large) MaterialTheme.typography.displaySmall else MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
     }
 }

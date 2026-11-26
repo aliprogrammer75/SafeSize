@@ -36,7 +36,6 @@ fun DashboardScreen(viewModel: TradeViewModel) {
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        BitunixAccountCard()
 
         Text("سرمایه و ژورنال دستی", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         // 1. Header (Account Summary)
@@ -116,7 +115,7 @@ fun DashboardScreen(viewModel: TradeViewModel) {
         val winRate = if (closedTrades.isNotEmpty()) (wins.size.toDouble() / closedTrades.size) * 100 else 0.0
         val grossProfit = wins.sumOf { it.pnl ?: 0.0 }
         val grossLoss = losses.sumOf { Math.abs(it.pnl ?: 0.0) }
-        val profitFactor = if (grossLoss > 0) grossProfit / grossLoss else if (grossProfit > 0) 999.9 else 0.0
+        val profitFactor = if (grossLoss > 0) grossProfit / grossLoss else 0.0
 
         Text("نبض عملکرد (کل)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -131,7 +130,7 @@ fun DashboardScreen(viewModel: TradeViewModel) {
                     Spacer(Modifier.height(4.dp))
                     val netPnl = grossProfit - grossLoss
                     Text(
-                        "${if(netPnl>=0)"+" else "-"}$${String.format("%,.1f", Math.abs(netPnl))}",
+                        "${if(netPnl>=0)"+" else "-"}$${String.format("%,.2f", Math.abs(netPnl))}",
                         fontWeight = FontWeight.Bold,
                         color = if (netPnl >= 0) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error
                     )
@@ -146,7 +145,7 @@ fun DashboardScreen(viewModel: TradeViewModel) {
                 Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("فاکتور سود", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(4.dp))
-                    Text(String.format("%.2f", profitFactor), fontWeight = FontWeight.Bold)
+                    Text(if (grossLoss == 0.0) "—" else String.format("%.2f", profitFactor), fontWeight = FontWeight.Bold)
                 }
             }
             OutlinedCard(

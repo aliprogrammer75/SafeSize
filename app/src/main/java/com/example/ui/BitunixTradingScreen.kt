@@ -117,13 +117,13 @@ fun BitunixTradingScreen() {
         Text("پوزیشن‌های واقعی", style = MaterialTheme.typography.titleLarge)
         if (snapshot == null) Text("ابتدا وضعیت حساب را دریافت کنید.")
         snapshot?.let { s ->
-            Text("موجودی آزاد: " + s.available + " USDT")
+            Text("موجودی آزاد: " + money(s.available) + " USDT")
             if (s.positions.isEmpty()) Text("پوزیشن بازی وجود ندارد.")
             s.positions.forEach { p ->
                 Card {
                     Column(Modifier.fillMaxWidth().padding(12.dp)) {
                         Text(p.symbol + " · " + p.side + " · " + p.leverage + "x", fontWeight = FontWeight.Bold)
-                        Text("حجم: " + p.qty + " | PnL: " + p.pnl)
+                        Text("حجم: " + p.qty + " | PnL: " + money(p.pnl))
                         OutlinedButton(enabled = canWrite, onClick = { closing = p; closeQty = p.qty }) { Text("بستن پوزیشن") }
                     }
                 }
@@ -148,7 +148,7 @@ fun BitunixTradingScreen() {
                 Text("حجم: " + p.draft.qty + " واحد ارز")
                 Text("قیمت: " + if (p.draft.kind == "MARKET") "قیمت بازار (ممکن است لغزش داشته باشد)" else p.draft.price)
                 Text("اهرم: " + p.leverage + "x · " + p.marginMode + " · " + p.mode)
-                Text("موجودی آزاد: " + p.available + " USDT")
+                Text("موجودی آزاد: " + money(p.available) + " USDT")
                 Text("حد ضرر: " + p.draft.sl.ifBlank { "ندارد" } + " | حد سود: " + p.draft.tp.ifBlank { "ندارد" })
                 if (p.mode == "ONE_WAY") Text("در حالت One-way سفارش مخالف ممکن است پوزیشن موجود را کاهش دهد یا معکوس کند.", color = MaterialTheme.colorScheme.error)
                 Text("تأیید نهایی، سفارش واقعی ارسال می‌کند. اجرای حد ضرر به قیمت دقیق تضمین نمی‌شود.", color = MaterialTheme.colorScheme.error)

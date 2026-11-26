@@ -22,7 +22,7 @@ import java.math.RoundingMode
 import java.util.Locale
 
 private fun fmt(n: BigDecimal) = n.stripTrailingZeros().toPlainString()
-private fun fmtShort(n: BigDecimal) = fmt(n.setScale(4,RoundingMode.HALF_UP))
+private fun fmtShort(n: BigDecimal) = money(n)
 
 @Composable
 fun MarketPlannerScreen(onManual: () -> Unit, onWatch: () -> Unit) {
@@ -44,12 +44,14 @@ fun MarketPlannerScreen(onManual: () -> Unit, onWatch: () -> Unit) {
     var target by remember { mutableStateOf("") }
     var risk by remember { mutableStateOf("1") }
     var fee by remember { mutableStateOf("0.06") }
+    var marketOrder by remember { mutableStateOf(false) }
     var long by remember { mutableStateOf(true) }
     var advanced by remember { mutableStateOf(false) }
     var pick by remember { mutableStateOf("entry") }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
     var preview by remember { mutableStateOf<BitunixPreview?>(null) }
+    var previewEntry by remember { mutableStateOf("") }
     var previewKey by remember { mutableStateOf("") }
     var confirmed by remember { mutableStateOf(false) }
     var checklist by remember { mutableStateOf(setOf<Int>()) }
@@ -62,6 +64,14 @@ fun MarketPlannerScreen(onManual: () -> Unit, onWatch: () -> Unit) {
         return c
     }
     suspend fun loadPairs() { pairs = MarketData.pairs() }
+    suspend fun freshEntry(): BigDecimal {
+        val q = MarketData.quotes(listOf(symbol))[symbol] ?: error("قیمت بازار دریافت نشد")
+        val p = pairs.firstOrNull { it.symbol == symbol } ?: error("نماد تأیید نشده")
+        val sl = stop.toBigDecimal()
+        val tp = target.takeIf { it.isNotBlank() }?.toBigDecimal()
+        require(if (long) sl < q.mark && (tp == null || tp > q.mark) else sl > q.mark && (tp == null || tp < q.mark)) { "حد سود یا ضرر با Mark Price فعلی سازگار نیست" }
+        return q.last.setScale(p.pricePrecision, RoundingMode.HALF_UP)
+    }
     LaunchedEffect(Unit) {
         try { loadPairs() } catch(e: CancellationException) { throw e } catch(_: Exception) { marketError = "دریافت فهرست نمادها ناموفق بود" }
         try { loadAccount() } catch(e: CancellationException) { throw e } catch(_: Exception) { message = "حساب در دسترس نیست؛ اتصال را بررسی کنید" }
@@ -79,15 +89,17 @@ fun MarketPlannerScreen(onManual: () -> Unit, onWatch: () -> Unit) {
             delay(15000)
         }
     }
-    fun calculate(p: MarketPair, balance: BigDecimal): Sizing {
+    fun calculate(p: MarketPair, balance: BigDecimal, reference: BigDecimal? = null): Sizing {
         val r = risk.toBigDecimal()
         require(r <= riskCap) { "ریسک از سقف شخصی بیشتر است" }
-        return MarketData.size(p,balance,r,entry.toBigDecimal(),stop.toBigDecimal(),target.takeIf { it.isNotBlank() }?.toBigDecimal(),long,fee.toBigDecimal())
+        return MarketData.size(p,balance,r,reference ?: (if (marketOrder) quote?.last ?: error("قیمت دریافت نشده") else entry.toBigDecimal()),stop.toBigDecimal(),target.takeIf { it.isNotBlank() }?.toBigDecimal(),long,fee.toBigDecimal())
     }
     val sizing = if (pair != null && available != null) runCatching { calculate(pair,available!!) }.getOrNull() else null
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("طراحی معامله • Bitunix",style = MaterialTheme.typography.headlineSmall,fontWeight = FontWeight.Bold)
-        Row { TextButton(onClick = onManual) { Text("ماشین حساب دستی") }; TextButton(onClick = onWatch) { Text("رصد بازار") } }
+        Text("REAL • سفارش واقعی فقط پس از تأیید نهایی", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
+        Button(onClick = { advanced = true }, enabled = MarketData.validSymbol(symbol) && !busy, modifier = Modifier.fillMaxWidth()) { Text("باز کردن چارت حرفه‌ای") }
+        Row { TextButton(onClick = onManual) { Text("ثبت دستی در ژورنال") }; TextButton(onClick = onWatch) { Text("رصد بازار") } }
         Card {
             Column(Modifier.padding(14.dp),verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(symbol,{ symbol = it.uppercase(Locale.US).replace("/","").trim().take(24); entry="";stop="";target="";checklist=emptySet() },label={Text("جستجوی نماد")},singleLine=true,enabled=!busy,modifier=Modifier.fillMaxWidth())
@@ -103,7 +115,7 @@ fun MarketPlannerScreen(onManual: () -> Unit, onWatch: () -> Unit) {
                 Row(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
                     listOf("entry" to "ورود","sl" to "ضرر","tp" to "سود").forEach { (id,label) -> FilterChip(pick==id,{pick=id},{Text(label)},enabled=!busy) }
                 }
-                Button(onClick = { advanced = true }, enabled = pair != null && !busy, modifier = Modifier.fillMaxWidth()) { Text("چارت حرفه‌ای تمام صفحه") }
+                if (pairs.isEmpty()) TextButton(onClick = { scope.launch { try { loadPairs(); marketError = "" } catch(e:CancellationException){throw e}catch(_:Exception){marketError="فهرست نمادها دریافت نشد"} } }) { Text("تلاش مجدد دریافت نمادها") }
                 Text("برای تعیین سطح انتخاب‌شده روی چارت لمس کنید؛ کندل‌های بسته‌شده، تازه‌سازی دوره‌ای.")
                 if (candles.isNotEmpty()) {
                     CandleChart(candles,entry.toDoubleOrNull(),stop.toDoubleOrNull(),target.toDoubleOrNull()) { v ->
@@ -121,12 +133,17 @@ fun MarketPlannerScreen(onManual: () -> Unit, onWatch: () -> Unit) {
         Card {
             Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
                 Text("محاسبه حجم براساس موجودی آزاد",style=MaterialTheme.typography.titleLarge)
-                Text("موجودی آزاد: "+(available?.let(::fmt) ?: "—")+" USDT • سقف ریسک "+fmt(riskCap)+"٪")
+                Text("موجودی آزاد: "+(available?.let(::money) ?: "—")+" USDT • سقف ریسک "+fmt(riskCap)+"٪")
                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                     FilterChip(long,{long=true;checklist=emptySet()},{Text("LONG")},enabled=!busy)
                     FilterChip(!long,{long=false;checklist=emptySet()},{Text("SHORT")},enabled=!busy)
                 }
-                OutlinedTextField(entry,{entry=it},label={Text("قیمت ورود Limit")},singleLine=true,enabled=!busy)
+                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                    FilterChip(marketOrder,{marketOrder=true;checklist=emptySet()},{Text("Market • ورود فوری")},enabled=!busy)
+                    FilterChip(!marketOrder,{marketOrder=false;checklist=emptySet()},{Text("Limit • قیمت مشخص")},enabled=!busy)
+                }
+                if (!marketOrder) OutlinedTextField(entry,{entry=it},label={Text("قیمت ورود Limit")},singleLine=true,enabled=!busy)
+                else Text("ورود تقریبی بازار: "+(quote?.last?.let(::fmt) ?: "—")+"؛ قیمت اجرای واقعی ممکن است متفاوت باشد.")
                 OutlinedTextField(stop,{stop=it},label={Text("حد ضرر (Mark Price)")},singleLine=true,enabled=!busy)
                 OutlinedTextField(target,{target=it},label={Text("حد سود (اختیاری، Mark Price)")},singleLine=true,enabled=!busy)
                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -151,18 +168,20 @@ fun MarketPlannerScreen(onManual: () -> Unit, onWatch: () -> Unit) {
                         try {
                             val c=loadAccount()
                             val marketPair=MarketData.pairs().first { it.symbol==symbol }
-                            val s=calculate(marketPair,available!!)
-                            val d=BitunixDraft(symbol,if(long)"BUY" else "SELL","LIMIT",fmt(s.quantity),entry,stop,target)
+                            val reference = if(marketOrder) freshEntry() else entry.toBigDecimal()
+                            val s=calculate(marketPair,available!!,reference)
+                            val d=BitunixDraft(symbol,if(long)"BUY" else "SELL",if(marketOrder)"MARKET" else "LIMIT",fmt(s.quantity),if(marketOrder) "" else entry,stop,target)
                             val v=BitunixClient.prepare(c,d)
                             require(v.mode=="HEDGE") { "برای جلوگیری از تغییر پوزیشن قبلی، این مسیر فعلاً فقط Hedge است" }
                             require(v.leverage>0 && s.notional.divide(BigDecimal(v.leverage),8,RoundingMode.UP)<v.available.toBigDecimal()) { "مارجین کافی نیست" }
                             require(s.loss<=v.available.toBigDecimal()*risk.toBigDecimal().movePointLeft(2)) { "موجودی تغییر کرده است" }
+                            previewEntry=fmt(reference)
                             previewKey=c.apiKey
                             preview=v
                         } catch(e:CancellationException){throw e} catch(e:IllegalArgumentException){message=e.message?:"ورودی نامعتبر"} catch(e:BitunixApiException){message="خطای API: "+e.code} catch(_:Exception){message="آماده‌سازی سفارش ناموفق بود"}
                         finally{busy=false}
                     }
-                }) { Text("بررسی و ثبت در بیت‌یونیکس") }
+                }) { Text("تأیید موقعیت") }
                 if(unresolved.isNotBlank()) {
                     Text("درخواست قبلی نیاز به بررسی دارد: "+unresolved,color=MaterialTheme.colorScheme.error)
                     TextButton(enabled=!busy,onClick={busy=true;scope.launch{try{val c=loadAccount();message=BitunixClient.orderStatus(c,unresolved)}catch(e:CancellationException){throw e}catch(_:Exception){message="استعلام ناموفق؛ صرافی را بررسی کنید"}finally{busy=false}}}) {Text("استعلام سفارش")}
@@ -180,12 +199,12 @@ fun MarketPlannerScreen(onManual: () -> Unit, onWatch: () -> Unit) {
     }
     preview?.let { v ->
         val d=v.draft
-        AlertDialog(onDismissRequest={preview=null;previewKey=""},title={Text("تأیید سفارش واقعی Limit")},text={
+        AlertDialog(onDismissRequest={preview=null;previewKey=""},title={Text("تأیید موقعیت واقعی • "+d.kind)},text={
             Column(verticalArrangement=Arrangement.spacedBy(6.dp)) {
                 Text(d.symbol+" • "+d.side+" • "+v.leverage+"x "+v.marginMode)
-                Text("حجم: "+d.qty+" | ورود: "+d.price)
+                Text("حجم: "+d.qty+" | ورود: "+previewEntry+(if(d.kind=="MARKET") " (تخمینی)" else ""))
                 Text("SL: "+d.sl+" | TP: "+d.tp.ifBlank{"—"})
-                Text("مارجین تقریبی: "+fmtShort((d.qty.toBigDecimal()*d.price.toBigDecimal()).divide(BigDecimal(v.leverage),8,RoundingMode.UP))+" USDT")
+                Text("مارجین تقریبی: "+fmtShort((d.qty.toBigDecimal()*previewEntry.toBigDecimal()).divide(BigDecimal(v.leverage),8,RoundingMode.UP))+" USDT")
                 Text("این درخواست واقعی است؛ اجرا و حد ضرر در قیمت دقیق تضمین نمی‌شود.",color=MaterialTheme.colorScheme.error)
             }
         },confirmButton={Button(enabled=!busy && confirmed && unresolved.isBlank(),onClick={
@@ -204,10 +223,10 @@ fun MarketPlannerScreen(onManual: () -> Unit, onWatch: () -> Unit) {
                     require(withContext(Dispatchers.IO){pending.edit().remove("id").commit()})
                     unresolved="";confirmed=false;checklist=emptySet()
                     message="درخواست سفارش پذیرفته شد: "+id+"؛ اجرای آن هنوز تأیید نشده."
-                }catch(e:CancellationException){throw e}catch(_:Exception){message="ارسال ناموفق یا نامشخص؛ قبل از تلاش مجدد وضعیت را در صرافی بررسی کنید"}
+                }catch(e:CancellationException){throw e}catch(e:IllegalArgumentException){message=if(unresolved.isBlank()) e.message?:"اعتبارسنجی ناموفق" else "وضعیت سفارش را در صرافی بررسی کنید"}catch(_:Exception){message="ارسال ناموفق یا نامشخص؛ قبل از تلاش مجدد وضعیت را در صرافی بررسی کنید"}
                 finally{busy=false}
             }
-        }){Text("ارسال سفارش")}},dismissButton={TextButton(onClick={preview=null;previewKey=""}){Text("انصراف")}})
+        }){Text("تأیید و ارسال واقعی")}},dismissButton={TextButton(onClick={preview=null;previewKey=""}){Text("انصراف")}})
     }
 }
 @Composable

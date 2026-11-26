@@ -40,6 +40,10 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.ui.DashboardScreen
+import com.example.ui.HomeScreen
+import com.example.ui.ChartHomeScreen
+import com.example.ui.DemoTradingScreen
+import com.example.ui.TradingMenuScreen
 import com.example.ui.MarketPlannerScreen
 import com.example.ui.MarketWatchScreen
 import com.example.ui.ExchangeHubScreen
@@ -74,32 +78,33 @@ class MainActivity : ComponentActivity() {
 fun MainScreen() {
     val navController = rememberNavController()
     val viewModel: TradeViewModel = viewModel()
-    
+
+    val currentEntry by navController.currentBackStackEntryAsState()
+    val route = currentEntry?.destination?.route
+    fun go(destination: String) { navController.navigate(destination) { launchSingleTop = true } }
     Scaffold(
         topBar = {
             Surface(color = MaterialTheme.colorScheme.background) {
                 Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 20.dp, vertical = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Column {
-                        Text("SafeSize", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                        Text("مدیریت ریسک و معاملات", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(if (route == "demo") "SafeSize • DEMO" else "SafeSize", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text(if (route == "demo") "حساب تمرینی مستقل" else "مدیریت ریسک و معاملات", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    Column {
-                        TextButton(onClick = { navController.navigate("watch") { launchSingleTop = true } }) { Text("رصد بازار") }
-                        TextButton(onClick = { navController.navigate("tools") { launchSingleTop = true } }) { Text("ابزارها") }
-                    }
+                    if (route != "dashboard") TextButton(onClick = { if (!navController.popBackStack()) go("dashboard") }) { Text("بازگشت") }
+                    else TextButton(onClick = { go("exchange") }) { Text("حساب‌ها") }
                 }
             }
         },
         bottomBar = {
-            NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
+            if (route != "demo") NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
                 val currentDestination = navBackStackEntry?.destination
                 
                 val items = listOf(
                     Triple("dashboard", "داشبورد", Icons.Filled.Home),
+                    Triple("chart", "چارت", Icons.Filled.Info),
                     Triple("calculator", "ماشین حساب", Icons.Filled.Add),
                     Triple("journal", "ژورنال", Icons.Filled.List),
-                    Triple("analytics", "تحلیل‌ها", Icons.Filled.Info),
                     Triple("exchange", "صرافی‌ها", Icons.Filled.Settings)
                 )
                 
@@ -128,7 +133,11 @@ fun MainScreen() {
             startDestination = "dashboard",
             modifier = Modifier.padding(innerPadding)
         ) {
-            composable("dashboard") { DashboardScreen(viewModel) }
+            composable("dashboard") { HomeScreen(viewModel, onNavigate = { go(it) }) }
+            composable("manual-dashboard") { DashboardScreen(viewModel) }
+            composable("chart") { ChartHomeScreen() }
+            composable("demo") { DemoTradingScreen() }
+            composable("trade-menu") { TradingMenuScreen(onNavigate = { go(it) }) }
             composable("calculator") { MarketPlannerScreen(onManual = { navController.navigate("manual-calculator") }, onWatch = { navController.navigate("watch") }) }
             composable("manual-calculator") { TradeCalculatorScreen(viewModel) }
             composable("watch") { MarketWatchScreen() }

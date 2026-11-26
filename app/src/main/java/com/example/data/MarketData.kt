@@ -9,13 +9,13 @@ import javax.net.ssl.HttpsURLConnection
 import java.math.BigDecimal
 import java.math.RoundingMode
 
-internal data class MarketPair(val symbol: String, val qtyPrecision: Int, val pricePrecision: Int, val minQty: BigDecimal, val maxQty: BigDecimal)
+internal data class MarketPair(val symbol: String, val qtyPrecision: Int, val pricePrecision: Int, val minQty: BigDecimal, val maxQty: BigDecimal, val maxMarketQty: BigDecimal = maxQty)
 internal data class Candle(val time: Long, val open: Double, val high: Double, val low: Double, val close: Double, val volume: Double)
 internal data class Quote(val mark: BigDecimal, val last: BigDecimal)
 internal data class TriggerNotice(val id: String, val symbol: String, val time: Long)
 internal data class Sizing(val quantity: BigDecimal, val loss: BigDecimal, val notional: BigDecimal, val reward: BigDecimal?)
 internal object MarketData {
-    val intervals = listOf("1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w", "1M")
+    val intervals = listOf("1m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w", "1M")
     fun validSymbol(symbol: String) = symbol.matches(Regex("[A-Z0-9]{2,20}USDT"))
     private fun request(path: String, query: String): JSONArray {
         require(path in setOf("trading_pairs", "tickers", "kline"))
@@ -35,7 +35,7 @@ internal object MarketData {
             val p = a.getJSONObject(i)
             val s = p.getString("symbol")
             if (validSymbol(s) && p.getString("quote") == "USDT" && p.getString("symbolStatus") == "OPEN" && p.getBoolean("isApiSupported"))
-                MarketPair(s, p.getInt("basePrecision"), p.getInt("quotePrecision"), p.getString("minTradeVolume").toBigDecimal(), p.getString("maxLimitOrderVolume").toBigDecimal()) else null
+                MarketPair(s, p.getInt("basePrecision"), p.getInt("quotePrecision"), p.getString("minTradeVolume").toBigDecimal(), p.getString("maxLimitOrderVolume").toBigDecimal(), p.getString("maxMarketOrderVolume").toBigDecimal()) else null
         }.sortedBy { it.symbol }
     }
     suspend fun quotes(symbols: List<String>): Map<String, Quote> = withContext(Dispatchers.IO) {

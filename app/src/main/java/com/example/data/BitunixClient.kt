@@ -211,6 +211,11 @@ internal object BitunixClient {
         val sl = if (draft.sl.isNotBlank()) positive(draft.sl) else null
         val tp = if (draft.tp.isNotBlank()) positive(draft.tp) else null
         listOfNotNull(price, sl, tp).forEach { require(it.stripTrailingZeros().scale() <= pair.getInt("quotePrecision")) { "دقت قیمت بیش از حد مجاز است" } }
+        if (draft.kind == "MARKET") {
+            val q = MarketData.quotes(listOf(draft.symbol))[draft.symbol] ?: error("قیمت بازار دریافت نشد")
+            require(sl == null || (if (draft.side == "BUY") sl < minOf(q.mark,q.last) else sl > maxOf(q.mark,q.last))) { "حد ضرر با قیمت فعلی سازگار نیست" }
+            require(tp == null || (if (draft.side == "BUY") tp > maxOf(q.mark,q.last) else tp < minOf(q.mark,q.last))) { "حد سود با قیمت فعلی سازگار نیست" }
+        }
         if (price != null) {
             require(sl == null || if (draft.side == "BUY") sl < price else sl > price) { "جهت حد ضرر نادرست است" }
             require(tp == null || if (draft.side == "BUY") tp > price else tp < price) { "جهت حد سود نادرست است" }

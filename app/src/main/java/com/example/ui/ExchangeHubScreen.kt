@@ -89,8 +89,8 @@ private fun OtherAccount(exchange: String) {
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
             data?.let { a ->
                 Text("آخرین دریافت موفق", color = MaterialTheme.colorScheme.tertiary)
-                a.available?.let { Text("موجودی آزاد USDT"); Text(it, style = MaterialTheme.typography.headlineMedium) }
-                a.balance?.let { Text("موجودی: " + it + " USDT") }
+                a.available?.let { Text("موجودی آزاد USDT"); Text(money(it), style = MaterialTheme.typography.headlineMedium) }
+                a.balance?.let { Text("موجودی: " + money(it) + " USDT") }
                 a.pnl?.let { Text("سود/زیان باز: " + it + " USDT") }
                 a.positions?.let { positions ->
                     HorizontalDivider()
@@ -100,7 +100,7 @@ private fun OtherAccount(exchange: String) {
                         Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant) {
                             Column(Modifier.fillMaxWidth().padding(12.dp)) {
                                 Text(p.symbol + " • " + p.side + " • " + p.leverage + "x")
-                                Text("حجم: " + p.size + " | PnL: " + p.pnl)
+                                Text("حجم: " + p.size + " | PnL: " + money(p.pnl))
                             }
                         }
                     }
@@ -251,7 +251,7 @@ private fun ExchangeJournal(exchange: String = "bitunix") {
                 Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant) {
                     Column(Modifier.fillMaxWidth().padding(12.dp)) {
                         Text("خلاصه رکوردهای فیلترشده")
-                        Text(sum.stripTrailingZeros().toPlainString() + " USDT", style = MaterialTheme.typography.headlineSmall, color = if (sum.signum() < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.tertiary)
+                        Text(money(sum) + " USDT", style = MaterialTheme.typography.headlineSmall, color = if (sum.signum() < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.tertiary)
                         Text("تعداد رکورد: " + shown.size + " | مثبت: " + pnl.count { it.signum() > 0 } + " | منفی: " + pnl.count { it.signum() < 0 })
                     }
                 }
@@ -275,7 +275,7 @@ private fun ExchangeJournal(exchange: String = "bitunix") {
             shown.forEach { e ->
                 HorizontalDivider()
                 Text(e.symbol + " • " + e.side, fontWeight = FontWeight.Bold)
-                Text("سود/زیان خام: " + e.pnl + " | کارمزد: " + e.fee + " | فاندینگ: " + e.funding)
+                Text("سود/زیان خام: " + money(e.pnl) + " | کارمزد: " + moneyWithUnit(e.fee) + " | فاندینگ: " + moneyWithUnit(e.funding))
                 Text(DateFormat.getDateTimeInstance().format(Date(e.time)), style = MaterialTheme.typography.labelSmall)
                 notes[e.id]?.let { n -> if (n.strategy.isNotBlank()) Text("استراتژی: " + n.strategy); if (n.note.isNotBlank()) Text(n.note) }
                 TextButton(enabled = !busy, onClick = {
