@@ -227,9 +227,12 @@ function olderRequest(cb){
  if(pendingOlder||!more)return false;const data=chart.getDataList();if(!data.length)return false;
  pendingOlder=true;pendingCallback=cb||null;ChartNative.older(String(data[0].timestamp));say('در حال دریافت تاریخچه قدیمی‌تر…');return true
 }
-function fitChart(){
+let nativeHeight=0,nativeWidth=0;
+function fitChart(hintHeight,hintWidth){
+ if(Number.isFinite(hintHeight)&&hintHeight>0)nativeHeight=hintHeight;
+ if(Number.isFinite(hintWidth)&&hintWidth>0)nativeWidth=hintWidth;
  const root=document.documentElement,body=document.body,toolbar=$('toolbar'),wrap=$('chartwrap');
- const h=Math.max(0,window.innerHeight||root.clientHeight),w=Math.max(0,window.innerWidth||root.clientWidth);
+ const h=Math.max(0,nativeHeight||window.innerHeight||root.clientHeight),w=Math.max(0,nativeWidth||window.innerWidth||root.clientWidth);
  if(!h||!w)return;
  body.style.height=h+'px';body.style.width=w+'px';
  const top=Math.ceil(toolbar.getBoundingClientRect().height);
@@ -247,7 +250,7 @@ window.SafeChart={
  init(key,precision){
   if(chart)return;series=key;registerCustom();chart=klinecharts.init('chart',{styles:'dark',timezone:'Etc/UTC',locale:'en-US'});
   if(!chart){say('موتور نمودار آماده نشد');return}
-  chart.setPriceVolumePrecision(precision,6);chart.setOffsetRightDistance(55);
+  chart.setPriceVolumePrecision(precision,6);chart.setOffsetRightDistance(35);
   chart.setStyles({candle:{bar:{upColor:'#2dd4bf',downColor:'#fb7185',noChangeColor:'#94a3b8',upBorderColor:'#2dd4bf',downBorderColor:'#fb7185',upWickColor:'#2dd4bf',downWickColor:'#fb7185'}}});
   for(const v of read('indicators',[{name:'VOL',params:[]}]))if(indicatorNames.includes(v.name))try{indicator(v.name,v.params||[],v)}catch(_){}
   currentStyle=read('chartStyle','candle_solid');chart.setStyles({candle:{type:currentStyle}});

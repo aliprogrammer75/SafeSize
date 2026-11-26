@@ -108,7 +108,7 @@ fun MainScreen() {
         }
     }
     val section = when(route) {
-        home -> "داشبورد"
+        home, "dashboard" -> "داشبورد"
         "exchange" -> "صرافی‌ها"
         "calculator" -> "ماشین حساب"
         "chart" -> "چارت"
@@ -125,7 +125,7 @@ fun MainScreen() {
                         Text(if (route == "demo") "SafeSize • DEMO" else "SafeSize", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                         Text(section, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    if (route != home) TextButton(onClick = { if (!navController.popBackStack()) selectTab(home) }) { Text("بازگشت") }
+                    if (route != home && route != "dashboard") TextButton(onClick = { if (!navController.popBackStack()) selectTab(home) }) { Text("بازگشت") }
                     else TextButton(onClick = { go("exchange") }) { Text("حساب‌ها") }
                 }
             }
@@ -161,6 +161,7 @@ fun MainScreen() {
             modifier = Modifier.fillMaxSize().padding(innerPadding)
         ) {
             composable(home) { HomeScreen(viewModel, onNavigate = { go(it) }) }
+            composable("dashboard") { HomeScreen(viewModel, onNavigate = { go(it) }) }
             composable("manual-dashboard") { DashboardScreen(viewModel) }
             composable("chart") { ChartHomeScreen() }
             composable("demo") { DemoTradingScreen() }

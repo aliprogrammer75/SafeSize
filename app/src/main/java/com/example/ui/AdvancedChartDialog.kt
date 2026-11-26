@@ -79,6 +79,13 @@ fun AdvancedChartDialog(symbol:String, initialInterval:String, precision:Int, en
     var oldest by remember{mutableStateOf(0L)}
     var lastClosed by remember{mutableStateOf(0L)}
     fun js(script:String){web?.evaluateJavascript(script,null)}
+    fun fit(v:WebView){
+        val density=v.resources.displayMetrics.density
+        if(v.height>0 && v.width>0 && density>0){
+            val h=v.height/density;val w=v.width/density
+            v.evaluateJavascript("window.SafeChart && window.SafeChart.fit("+h+","+w+")",null)
+        }
+    }
     fun loadOlder(timestamp:Long){
         if(!ready || loadingOlder || oldest<=0 || timestamp!=oldest)return
         loadingOlder=true
@@ -142,7 +149,8 @@ fun AdvancedChartDialog(symbol:String, initialInterval:String, precision:Int, en
         Text(status,style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
         val h = maxHeight
-        AndroidView(modifier=Modifier.fillMaxSize(),factory={context->
+        val w = maxWidth
+        AndroidView(modifier=Modifier.requiredSize(w,h),factory={context->
             val loader=WebViewAssetLoader.Builder().addPathHandler("/assets/",WebViewAssetLoader.AssetsPathHandler(context)).build()
             WebView(context).apply{
                 web=this
@@ -167,6 +175,7 @@ fun AdvancedChartDialog(symbol:String, initialInterval:String, precision:Int, en
                 ),"ChartNative")
                 webViewClient=object:WebViewClient(){
                     override fun onPageFinished(view:WebView,url:String){
+                        fit(view)
                         view.evaluateJavascript("typeof window.SafeChart !== 'undefined' && typeof window.klinecharts !== 'undefined'"){v->if(v!="true")status="موتور چارت آماده نشد؛ فایل نمودار یا Android System WebView را بررسی کنید"}
                     }
                     override fun shouldOverrideUrlLoading(view:WebView,request:WebResourceRequest)=request.url.toString()!=chartUrl
@@ -177,14 +186,12 @@ fun AdvancedChartDialog(symbol:String, initialInterval:String, precision:Int, en
                 }
                 addOnLayoutChangeListener { v,_,_,_,_,_,_,_,_ ->
                     val wv=v as WebView
-                    wv.post { wv.evaluateJavascript("window.SafeChart && window.SafeChart.fit()",null) }
+                    wv.post { fit(wv) }
                 }
                 loadUrl(chartUrl)
             }
-        },update={ v ->
-            v.post { v.evaluateJavascript("window.SafeChart && window.SafeChart.fit()",null) }
         })
-        LaunchedEffect(h, ready) { if(ready) { delay(100); js("window.SafeChart.fit()") } }
+        LaunchedEffect(h,w,ready) { if(ready) { delay(100); web?.let { fit(it) }; delay(350); web?.let { fit(it) } } }
         }
     }
 }
