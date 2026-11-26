@@ -92,7 +92,7 @@ fun MarketPlannerScreen(onManual: () -> Unit, onWatch: () -> Unit) {
     fun calculate(p: MarketPair, balance: BigDecimal, reference: BigDecimal? = null): Sizing {
         val r = risk.toBigDecimal()
         require(r <= riskCap) { "ریسک از سقف شخصی بیشتر است" }
-        return MarketData.size(p,balance,r,reference ?: (if (marketOrder) quote?.last ?: error("قیمت دریافت نشده") else entry.toBigDecimal()),stop.toBigDecimal(),target.takeIf { it.isNotBlank() }?.toBigDecimal(),long,fee.toBigDecimal())
+        return MarketData.size(if(marketOrder) p.copy(maxQty=p.maxMarketQty) else p,balance,r,reference ?: (if (marketOrder) quote?.last?.setScale(p.pricePrecision,RoundingMode.HALF_UP) ?: error("قیمت دریافت نشده") else entry.toBigDecimal()),stop.toBigDecimal(),target.takeIf { it.isNotBlank() }?.toBigDecimal(),long,fee.toBigDecimal())
     }
     val sizing = if (pair != null && available != null) runCatching { calculate(pair,available!!) }.getOrNull() else null
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -215,8 +215,9 @@ fun MarketPlannerScreen(onManual: () -> Unit, onWatch: () -> Unit) {
                     val c=loadAccount()
                     require(c.apiKey==key)
                     val pairNow=MarketData.pairs().first { it.symbol==d.symbol }
-                    val s=calculate(pairNow,available!!)
-                    require(s.quantity>=d.qty.toBigDecimal() && (d.qty.toBigDecimal()*d.price.toBigDecimal()).divide(BigDecimal(v.leverage),8,RoundingMode.UP)<available!!)
+                    val currentReference=if(d.kind=="MARKET") freshEntry() else d.price.toBigDecimal()
+                    val s=calculate(pairNow,available!!,currentReference)
+                    require(s.quantity>=d.qty.toBigDecimal() && (d.qty.toBigDecimal()*currentReference).divide(BigDecimal(v.leverage),8,RoundingMode.UP)<available!!) { "قیمت یا موجودی تغییر کرده است؛ دوباره موقعیت را تأیید کنید" }
                     require(withContext(Dispatchers.IO){pending.edit().putString("id",v.clientId).commit()})
                     unresolved=v.clientId
                     val id=BitunixClient.place(c,v)

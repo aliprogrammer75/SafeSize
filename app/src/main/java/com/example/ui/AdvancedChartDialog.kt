@@ -125,7 +125,7 @@ fun AdvancedChartDialog(symbol:String, initialInterval:String, precision:Int, en
                     }
                 }
             }catch(e:TimeoutCancellationException){status="در حال تازه‌سازی تاریخچه"}
-            catch(e:CancellationException){throw e}catch(_:Exception){status="ارتباط زنده قطع است؛ تلاش مجدد"}
+            catch(e:CancellationException){throw e}catch(_:Exception){status=if(oldest==0L) "دریافت داده نمودار ناموفق؛ نماد و اتصال اینترنت را بررسی کنید" else "ارتباط زنده قطع است؛ تلاش مجدد"}
             delay(1500)
         }
     }

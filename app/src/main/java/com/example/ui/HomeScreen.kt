@@ -47,10 +47,10 @@ fun HomeScreen(viewModel: TradeViewModel,onNavigate:(String)->Unit){
         }
         Button(onClick={onNavigate("chart")},modifier=Modifier.fillMaxWidth().heightIn(min=58.dp)){Text("چارت حرفه‌ای بیت‌یونیکس",style=MaterialTheme.typography.titleMedium)}
         Row(horizontalArrangement=Arrangement.spacedBy(10.dp)){
-            Card(Modifier.weight(1f),onClick={onNavigate("trade-menu")},colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surfaceVariant)){
+            Card(modifier=Modifier.weight(1f),onClick={onNavigate("trade-menu")},colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surfaceVariant)){
                 Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){Text("REAL",color=MaterialTheme.colorScheme.error,fontWeight=FontWeight.Bold);Text("معامله واقعی",style=MaterialTheme.typography.titleMedium);Text("محاسبه ریسک یا ثبت مستقیم",style=MaterialTheme.typography.bodySmall)}
             }
-            Card(Modifier.weight(1f),onClick={onNavigate("demo")},colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.secondaryContainer)){
+            Card(modifier=Modifier.weight(1f),onClick={onNavigate("demo")},colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.secondaryContainer)){
                 Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){Text("DEMO",color=MaterialTheme.colorScheme.primary,fontWeight=FontWeight.Bold);Text("حساب تمرینی",style=MaterialTheme.typography.titleMedium);Text("سرمایه و ژورنال جداگانه",style=MaterialTheme.typography.bodySmall)}
             }
         }

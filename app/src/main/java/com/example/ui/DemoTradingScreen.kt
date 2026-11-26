@@ -81,7 +81,7 @@ fun DemoTradingScreen(){
         val en=q.last.setScale(p.pricePrecision,RoundingMode.HALF_UP)
         val sl=stop.toBigDecimal();val tp=target.toBigDecimal()
         require(if(long)sl<q.mark&&tp>q.mark else sl>q.mark&&tp<q.mark)
-        val s=MarketData.size(p,BigDecimal.valueOf(a.cash),r,en,sl,tp,long,BigDecimal("0.06"))
+        val s=MarketData.size(p.copy(maxQty=p.maxMarketQty),BigDecimal.valueOf(a.cash),r,en,sl,tp,long,BigDecimal("0.06"))
         require(s.quantity<=p.maxMarketQty&&s.notional+s.notional*BigDecimal("0.0012")<=BigDecimal.valueOf(a.cash)){"در این دمو بدون اهرم، سرمایه کافی نیست"}
         return DemoTrade(symbol,long,en.toDouble(),sl.toDouble(),tp.toDouble(),s.quantity.toDouble(),0.0006,System.currentTimeMillis())
     }
@@ -104,12 +104,12 @@ fun DemoTradingScreen(){
             OutlinedTextField(stop,{stop=it},label={Text("حد ضرر")},singleLine=true,enabled=!busy)
             OutlinedTextField(target,{target=it},label={Text("حد سود")},singleLine=true,enabled=!busy)
             OutlinedTextField(risk,{risk=it},label={Text("ریسک٪ (حداکثر ۵)")},singleLine=true,enabled=!busy)
-            draft?.let{Text("حجم: "+it.qty+" • زیان تخمینی: "+money(-profit(it,it.stop))+" USDT")}
+            draft?.let{Text("حجم: "+BigDecimal.valueOf(it.qty).stripTrailingZeros().toPlainString()+" • زیان تخمینی: "+money(-profit(it,it.stop))+" USDT")}
             Button(enabled=draft!=null&&!busy,onClick={confirm=true},modifier=Modifier.fillMaxWidth()){Text("تأیید موقعیت تمرینی")}
         }else{
             Card{
                 Column(Modifier.fillMaxWidth().padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
-                    Text("پوزیشن تمرینی • "+active.symbol+" • "+if(active.long)"LONG" else "SHORT",fontWeight=FontWeight.Bold)
+                    Text("پوزیشن تمرینی • "+active.symbol+" • "+(if(active.long)"LONG" else "SHORT"),fontWeight=FontWeight.Bold)
                     Text("ورود: "+active.entry+" | SL: "+active.stop+" | TP: "+active.target)
                     Text("PnL تخمینی: "+(quote?.last?.toDouble()?.let{money(profit(active,it))}?:"—")+" USDT")
                     Button(enabled=!busy,onClick={busy=true;scope.launch{try{val q=MarketData.quotes(listOf(active.symbol))[active.symbol]?:error("No quote");closeAt(active,q.last.toDouble(),"MANUAL")}catch(e:CancellationException){throw e}catch(_:Exception){status="خروج تمرینی ناموفق؛ قیمت دریافت نشد"}finally{busy=false}}}){Text("بستن تمرینی")}
