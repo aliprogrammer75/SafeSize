@@ -40,6 +40,9 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.ui.DashboardScreen
+import com.example.ui.ExchangeHubScreen
+import com.example.ui.RiskStudioScreen
+import androidx.compose.material3.TextButton
 import com.example.ui.BitunixTradingScreen
 import com.example.ui.TradeAnalyticsScreen
 import com.example.ui.TradeCalculatorScreen
@@ -77,7 +80,7 @@ fun MainScreen() {
                         Text("SafeSize", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                         Text("مدیریت ریسک و معاملات", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    Text("BITUNIX", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                    TextButton(onClick = { navController.navigate("risk") { launchSingleTop = true } }) { Text("محافظ سرمایه") }
                 }
             }
         },
@@ -91,7 +94,7 @@ fun MainScreen() {
                     Triple("calculator", "ماشین حساب", Icons.Filled.Add),
                     Triple("journal", "ژورنال", Icons.Filled.List),
                     Triple("analytics", "تحلیل‌ها", Icons.Filled.Info),
-                    Triple("exchange", "معامله", Icons.Filled.Settings)
+                    Triple("exchange", "صرافی‌ها", Icons.Filled.Settings)
                 )
                 
                 items.forEach { (route, label, icon) ->
@@ -123,7 +126,9 @@ fun MainScreen() {
             composable("calculator") { TradeCalculatorScreen(viewModel) }
             composable("journal") { TradeJournalScreen(viewModel) }
             composable("analytics") { TradeAnalyticsScreen(viewModel) }
-            composable("exchange") { BitunixTradingScreen() }
+            composable("exchange") { ExchangeHubScreen(onTrade = { navController.navigate("bitunix-trade") }) }
+            composable("bitunix-trade") { BitunixTradingScreen() }
+            composable("risk") { RiskStudioScreen(viewModel) }
         }
     }
 }

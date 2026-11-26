@@ -21,7 +21,7 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import javax.net.ssl.HttpsURLConnection
 
-internal data class BitunixCredentials(val apiKey: String, val secret: String)
+internal data class BitunixCredentials(val apiKey: String, val secret: String, val passphrase: String = "")
 internal data class BitunixPosition(val symbol: String, val side: String, val leverage: String, val entry: String, val margin: String, val pnl: String, val id: String, val qty: String, val mode: String)
 internal data class BitunixSnapshot(val available: String, val margin: String, val frozen: String, val crossPnl: String, val isolatedPnl: String, val positions: List<BitunixPosition>, val fetchedAt: Long)
 
@@ -29,9 +29,9 @@ internal class BitunixApiException(val code: Int) : Exception("Bitunix API error
 
 // Keys never leave this device except the API key in authenticated HTTPS headers.
 // Ciphertext is excluded from Android backup; the AES key is non-exportable.
-internal class BitunixVault(context: Context) {
-    private val file = AtomicFile(File(context.noBackupFilesDir, "bitunix_credentials_v1"))
-    private val alias = "safesize.bitunix.aes.v1"
+internal class BitunixVault(context: Context, private val exchange: String = "bitunix") {
+    private val file = AtomicFile(File(context.noBackupFilesDir, exchange + "_credentials_v1"))
+    private val alias = "safesize." + exchange + ".aes.v1"
     private fun key(create: Boolean): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         (store.getKey(alias, null) as? SecretKey)?.let { return it }
@@ -51,13 +51,13 @@ internal class BitunixVault(context: Context) {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, key(false), GCMParameterSpec(128, bytes.copyOfRange(0, 12)))
         val json = JSONObject(String(cipher.doFinal(bytes.copyOfRange(12, bytes.size)), Charsets.UTF_8))
-        return BitunixCredentials(json.getString("apiKey"), json.getString("secret"))
+        return BitunixCredentials(json.getString("apiKey"), json.getString("secret"), json.optString("passphrase"))
     }
     fun save(credentials: BitunixCredentials) {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, key(true))
         require(cipher.iv.size == 12)
-        val json = JSONObject().put("apiKey", credentials.apiKey).put("secret", credentials.secret)
+        val json = JSONObject().put("apiKey", credentials.apiKey).put("secret", credentials.secret).put("passphrase", credentials.passphrase)
         val payload = cipher.iv + cipher.doFinal(json.toString().toByteArray(Charsets.UTF_8))
         val output = file.startWrite()
         try { output.write(payload); file.finishWrite(output) }
@@ -75,7 +75,7 @@ internal object BitunixClient {
     private fun sha(value: String) = hex(MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8)))
     // Fixed endpoint allowlist; no withdrawal or transfer routes.
     private fun get(credentials: BitunixCredentials, path: String, query: String, canonical: String, body: String? = null): JSONObject {
-        require(path in setOf("/api/v1/futures/account", "/api/v1/futures/position/get_pending_positions", "/api/v1/futures/account/get_leverage_margin_mode", "/api/v1/futures/trade/get_pending_orders", "/api/v1/futures/market/trading_pairs", "/api/v1/futures/trade/get_order_detail", "/api/v1/futures/trade/place_order", "/api/v1/futures/trade/flash_close_position", "/api/v1/futures/trade/cancel_orders"))
+        require(path in setOf("/api/v1/futures/position/get_history_positions", "/api/v1/futures/account", "/api/v1/futures/position/get_pending_positions", "/api/v1/futures/account/get_leverage_margin_mode", "/api/v1/futures/trade/get_pending_orders", "/api/v1/futures/market/trading_pairs", "/api/v1/futures/trade/get_order_detail", "/api/v1/futures/trade/place_order", "/api/v1/futures/trade/flash_close_position", "/api/v1/futures/trade/cancel_orders"))
         require(if (body == null) !path.endsWith("/place_order") && !path.endsWith("/flash_close_position") && !path.endsWith("/cancel_orders") else path.endsWith("/place_order") || path.endsWith("/flash_close_position") || path.endsWith("/cancel_orders"))
         val nonce = hex(ByteArray(8).also { random.nextBytes(it) })
         val timestamp = System.currentTimeMillis().toString()
@@ -118,6 +118,20 @@ internal object BitunixClient {
             account.getString("crossUnrealizedPNL"), account.getString("isolationUnrealizedPNL"), positions, System.currentTimeMillis())
     }
 
+    suspend fun history(c: BitunixCredentials): List<ExchangeHistory> = withContext(Dispatchers.IO) {
+        val result = mutableListOf<ExchangeHistory>()
+        for (page in 0 until 5) {
+            val skip = page * 100
+            val d = get(c, "/api/v1/futures/position/get_history_positions", "?limit=100&skip=" + skip, "limit100skip" + skip).getJSONObject("data")
+            val a = d.getJSONArray("positionList")
+            for (i in 0 until a.length()) {
+                val x = a.getJSONObject(i)
+                result.add(ExchangeHistory(x.getString("positionId"), x.getString("symbol"), x.getString("side"), x.getString("realizedPNL"), x.getString("fee"), x.getString("funding"), x.getLong("mtime")))
+            }
+            if (a.length() < 100 || result.size >= d.getInt("total")) break
+        }
+        result.distinctBy { it.id }.sortedByDescending { it.time }
+    }
     private fun validSymbol(s: String) = s.matches(Regex("[A-Z0-9]{2,20}USDT"))
     private fun positive(s: String): BigDecimal {
         require(s.matches(Regex("[0-9]{1,16}(\\.[0-9]{1,16})?"))) { "عدد نامعتبر است" }
