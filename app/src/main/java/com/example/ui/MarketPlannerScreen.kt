@@ -45,6 +45,7 @@ fun MarketPlannerScreen(onManual: () -> Unit, onWatch: () -> Unit) {
     var risk by remember { mutableStateOf("1") }
     var fee by remember { mutableStateOf("0.06") }
     var long by remember { mutableStateOf(true) }
+    var advanced by remember { mutableStateOf(false) }
     var pick by remember { mutableStateOf("entry") }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
@@ -102,6 +103,7 @@ fun MarketPlannerScreen(onManual: () -> Unit, onWatch: () -> Unit) {
                 Row(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
                     listOf("entry" to "ورود","sl" to "ضرر","tp" to "سود").forEach { (id,label) -> FilterChip(pick==id,{pick=id},{Text(label)},enabled=!busy) }
                 }
+                Button(onClick = { advanced = true }, enabled = pair != null && !busy, modifier = Modifier.fillMaxWidth()) { Text("چارت حرفه‌ای تمام صفحه") }
                 Text("برای تعیین سطح انتخاب‌شده روی چارت لمس کنید؛ کندل‌های بسته‌شده، تازه‌سازی دوره‌ای.")
                 if (candles.isNotEmpty()) {
                     CandleChart(candles,entry.toDoubleOrNull(),stop.toDoubleOrNull(),target.toDoubleOrNull()) { v ->
@@ -170,6 +172,11 @@ fun MarketPlannerScreen(onManual: () -> Unit, onWatch: () -> Unit) {
                 if(message.isNotBlank()) Text(message)
             }
         }
+    }
+    if (advanced) {
+        AdvancedChartDialog(symbol, interval, pair?.pricePrecision ?: 8, entry, stop, target, onDismiss = { advanced = false }, onSelect = { kind, price ->
+            when (kind) { "entry" -> entry = price; "sl" -> stop = price; "tp" -> target = price }
+        })
     }
     preview?.let { v ->
         val d=v.draft

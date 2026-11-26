@@ -15,7 +15,7 @@ internal data class Quote(val mark: BigDecimal, val last: BigDecimal)
 internal data class TriggerNotice(val id: String, val symbol: String, val time: Long)
 internal data class Sizing(val quantity: BigDecimal, val loss: BigDecimal, val notional: BigDecimal, val reward: BigDecimal?)
 internal object MarketData {
-    val intervals = listOf("1m", "5m", "15m", "30m", "1h", "4h", "1d")
+    val intervals = listOf("1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w", "1M")
     fun validSymbol(symbol: String) = symbol.matches(Regex("[A-Z0-9]{2,20}USDT"))
     private fun request(path: String, query: String): JSONArray {
         require(path in setOf("trading_pairs", "tickers", "kline"))
@@ -46,9 +46,9 @@ internal object MarketData {
             t.getString("symbol") to Quote(t.getString("markPrice").toBigDecimal(), t.getString("lastPrice").toBigDecimal())
         }
     }
-    suspend fun candles(symbol: String, interval: String): List<Candle> = withContext(Dispatchers.IO) {
-        require(validSymbol(symbol) && interval in intervals)
-        val a = request("kline", "?symbol=" + symbol + "&interval=" + interval + "&limit=100&type=LAST_PRICE")
+    suspend fun candles(symbol: String, interval: String, type: String = "LAST_PRICE", before: Long? = null, limit: Int = 100): List<Candle> = withContext(Dispatchers.IO) {
+        require(validSymbol(symbol) && interval in intervals && type in listOf("LAST_PRICE", "MARK_PRICE") && limit in 1..200 && (before == null || before > 0))
+        val a = request("kline", "?symbol=" + symbol + "&interval=" + interval + "&limit=" + limit + "&type=" + type + (before?.let { "&endTime=" + it } ?: ""))
         (0 until a.length()).map { i -> a.getJSONObject(i).let { c ->
             Candle(c.getLong("time"), c.getString("open").toDouble(), c.getString("high").toDouble(), c.getString("low").toDouble(), c.getString("close").toDouble(), c.getString("baseVol").toDouble())
         } }.filter { listOf(it.open,it.high,it.low,it.close,it.volume).all { v -> v.isFinite() } && it.volume >= 0 && it.low > 0 && it.high >= it.low && it.open in it.low..it.high && it.close in it.low..it.high }
