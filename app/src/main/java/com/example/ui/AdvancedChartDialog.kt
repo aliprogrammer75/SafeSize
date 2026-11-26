@@ -105,15 +105,15 @@ fun AdvancedChartDialog(symbol:String, initialInterval:String, precision:Int, en
                         js("window.SafeChart.sync("+candlesJson(fresh)+")")
                     }
                 }
-                status="کندل‌های بسته‌شده دریافت شدند؛ اتصال زنده"
-                withTimeout(60000){
+                status="تاریخچه دریافت شد؛ در انتظار اتصال WebSocket"
+                withTimeout(600000){
                     MarketLive.stream(symbol,interval,type).conflate().collect{live->
                         var start=MarketLive.nextOpen(lastClosed,interval)
                         // A gap or rollover is reconciled with REST, not filled with fake candles.
                         if(live.eventTime>=MarketLive.nextOpen(start,interval) || live.eventTime<start){
                             val newer=MarketData.candles(symbol,interval,type,null,200).filter{it.time>=lastClosed}
                             if(newer.isNotEmpty()){
-                                lastClosed=newer.last().time;lastPlotted=lastClosed
+                                lastClosed=newer.last().time
                                 js("window.SafeChart.sync("+candlesJson(newer)+")")
                             }
                             start=MarketLive.nextOpen(lastClosed,interval)
@@ -154,6 +154,9 @@ fun AdvancedChartDialog(symbol:String, initialInterval:String, precision:Int, en
                     }}
                 ),"ChartNative")
                 webViewClient=object:WebViewClient(){
+                    override fun onPageFinished(view:WebView,url:String){
+                        view.evaluateJavascript("typeof window.SafeChart !== 'undefined' && typeof window.klinecharts !== 'undefined'"){v->if(v!="true")status="موتور چارت آماده نشد؛ فایل نمودار یا Android System WebView را بررسی کنید"}
+                    }
                     override fun shouldOverrideUrlLoading(view:WebView,request:WebResourceRequest)=request.url.toString()!=chartUrl
                     override fun shouldInterceptRequest(view:WebView,request:WebResourceRequest):WebResourceResponse? =
                         if(request.url.scheme=="https" && request.url.host=="appassets.androidplatform.net" && request.url.path?.startsWith("/assets/chart/")==true)

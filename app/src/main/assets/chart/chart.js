@@ -67,12 +67,12 @@ window.SafeChart={
   chart.setStyles({candle:{bar:{upColor:'#2dd4bf',downColor:'#fb7185',noChangeColor:'#94a3b8',upBorderColor:'#2dd4bf',downBorderColor:'#fb7185',upWickColor:'#2dd4bf',downWickColor:'#fb7185'}}});
   for(const v of read('indicators',[{name:'VOL',params:[]}]))if(indicatorNames.includes(v.name))try{indicator(v.name,v.params)}catch(_){}
   currentStyle=read('chartStyle','candle_solid');chart.setStyles({candle:{type:currentStyle}});
-  chart.setLoadDataCallback(({type,data,callback})=>{if(type==='forward'){if(!olderRequest(callback))callback([],more)}else callback([],false)});
+  chart.setLoadDataCallback(({type,data,callback})=>{if(data && data.timestamp===chart.getDataList()[0]?.timestamp){if(!olderRequest(callback))callback([],more)}else callback([],false)});
   new ResizeObserver(()=>chart.resize()).observe($('chart'));say('آماده دریافت داده بیت‌یونیکس')
  },
- reset(data){if(!chart||!data.length)return;chart.applyNewData(data,true);initialized=true;more=data.length===200;for(const o of read('draw:'+series,[]))if(overlayTools.some(x=>x[0]===o.name)&&o.points?.length)try{drawTool(o.name,o.points)}catch(_){}updateLevels();say('تاریخچه بارگذاری شد')},
+ reset(data){if(!chart||!data.length)return;more=data.length===200;chart.applyNewData(data,more);initialized=true;for(const o of read('draw:'+series,[]))if(overlayTools.some(x=>x[0]===o.name)&&o.points?.length)try{drawTool(o.name,o.points)}catch(_){}updateLevels();say('تاریخچه بارگذاری شد')},
  sync(data){if(!chart||!data.length)return;const prev=chart.getDataList();if(!prev.length){this.reset(data);return}const last=prev[prev.length-1].timestamp;const map=new Map(prev.map(x=>[x.timestamp,x]));for(const b of data)map.set(b.timestamp,b);const all=[...map.values()].sort((a,b)=>a.timestamp-b.timestamp);
-  const earlier=data.some(b=>b.timestamp<last);if(earlier){const visible=chart.getVisibleRange(),anchor=prev[Math.min(prev.length-1,Math.max(0,visible?.to||0))]?.timestamp;chart.applyNewData(all,more);if(anchor&&visible.to<prev.length-3)chart.scrollToTimestamp(anchor)}else for(const b of data)if(b.timestamp>=last)chart.updateData(b);
+  const earlier=data.some(b=>{const old=prev.find(p=>p.timestamp===b.timestamp);return b.timestamp<last&&(!old||['open','high','low','close','volume'].some(k=>old[k]!==b[k]))});if(earlier){const visible=chart.getVisibleRange(),anchor=prev[Math.min(prev.length-1,Math.max(0,visible?.to||0))]?.timestamp;chart.applyNewData(all,more);if(anchor&&visible.to<prev.length-3)chart.scrollToTimestamp(anchor)}else for(const b of data)if(b.timestamp>=last)chart.updateData(b);
  },
  tick(b){if(!chart||!initialized||!b)return;const d=chart.getDataList();if(d.length&&b.timestamp>=d[d.length-1].timestamp)chart.updateData(b)},
  older(data,hasMore){if(!chart)return;more=hasMore;const cb=pendingCallback;pendingCallback=null;pendingOlder=false;if(cb)cb(data,hasMore);else if(data.length)chart.applyMoreData(data,hasMore);say(data.length?'تاریخچه افزوده شد':'تاریخچه بیشتری دریافت نشد')},

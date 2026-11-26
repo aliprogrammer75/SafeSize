@@ -37,7 +37,9 @@ jobs:
         with:
           node-version: "22"
       - name: Bundle pinned open-source chart engine
-        run: bash scripts/prepare-chart.sh
+        run: |
+          bash scripts/prepare-chart.sh
+          node --check app/src/main/assets/chart/chart.js
       - run: gradle :app:assembleDebug --no-daemon
       - uses: actions/upload-artifact@v4
         with:
