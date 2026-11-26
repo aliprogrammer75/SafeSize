@@ -1,17 +1,32 @@
 <!DOCTYPE html>
-<html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'none'; img-src 'self' data:; object-src 'none'; base-uri 'none'"><link rel="stylesheet" href="chart.css"><script defer src="klinecharts.min.js"></script><script defer src="chart.js"></script><title>SafeSize Chart</title></head>
+<html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'none'; img-src 'self' data:; object-src 'none'; base-uri 'none'"><link rel="stylesheet" href="chart.css"><script defer src="klinecharts.min.js"></script><script defer src="drawing-geometry.js"></script><script defer src="chart.js"></script><script defer src="drawing-layer.js"></script><title>SafeSize Chart</title></head>
 <body>
 <div id="notice" role="status">در حال آماده‌سازی نمودار…</div>
-<div id="chartwrap"><div id="chart" dir="ltr"></div><div id="touchpad" hidden><div id="guide" hidden></div></div><div id="quick" hidden></div><div id="selection" class="bar" hidden><span id="selname"></span><button id="selsettings">تنظیمات</button><button id="selmove">جابجایی</button><button id="seldel">حذف</button><button id="selmore">بیشتر</button></div></div>
+<main id="chartwrap" aria-label="نمودار قیمت">
+ <div id="chart" dir="ltr"></div>
+ <canvas id="drawing-layer" aria-hidden="true"></canvas>
+ <div id="guide" hidden><span id="guide-label" dir="ltr"></span></div>
+ <div id="quick" hidden></div>
+ <div id="legend" class="bar" aria-label="اندیکاتورهای فعال" hidden></div>
+ <div id="selection" class="bar" hidden>
+  <span id="selname"></span>
+  <button id="selsettings" aria-label="تنظیمات ابزار" title="تنظیمات ابزار"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16M8 4v4M15 10v4M10 16v4"/></svg></button>
+  <button id="sellock" aria-label="قفل ابزار"></button>
+  <button id="seldel" aria-label="حذف ابزار" title="حذف ابزار"><svg viewBox="0 0 24 24"><path d="M4 6h16M8 6V3h8v3m2 0-1 15H7L6 6m4 4v7m4-7v7"/></svg></button>
+  <button id="selmore" aria-label="عملیات ابزار" title="عملیات ابزار"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+ </div>
+</main>
 <div id="toolbar" class="bar" aria-label="ابزارهای چارت">
 <button id="draw" class="navtool" aria-label="ترسیم"><svg viewBox="0 0 24 24"><path d="m4 19 4-1L20 6l-4-4L4 14zM14 4l4 4M3 22h18"/></svg><span>ترسیم</span></button>
 <button id="ind" class="navtool"><svg viewBox="0 0 24 24"><path d="M3 18 8 9l5 5 7-10M3 22h18"/></svg><span>اندیکاتور</span></button>
-<button id="objects" class="navtool"><svg viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5zM3 12l9 5 9-5M3 16l9 5 9-5"/></svg><span>ابزارها</span></button>
+<button id="magnet" class="navtool" aria-label="آهنربا"><svg viewBox="0 0 24 24"><path d="M5 5v8a7 7 0 0 0 14 0V5h-4v8a3 3 0 0 1-6 0V5H5zm0 4h4m6 0h4"/></svg><span>آهنربا</span></button>
+<button id="undo" class="navtool" disabled aria-label="واگردانی"><svg viewBox="0 0 24 24"><path d="M9 5 4 10l5 5m-5-5h11a5 5 0 0 1 0 10h-3"/></svg><span>واگردانی</span></button>
+<button id="redo" class="navtool" disabled aria-label="انجام دوباره"><svg viewBox="0 0 24 24"><path d="m15 5 5 5-5 5m5-5H9a5 5 0 0 0 0 10h3"/></svg><span>انجام دوباره</span></button>
 <button id="options" class="navtool"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg><span>بیشتر</span></button>
 <button id="live" class="navtool"><svg viewBox="0 0 24 24"><path d="m3 5 7 7-7 7m9-14 7 7-7 7"/></svg><span>آخرین</span></button>
-<button id="cancel" class="navtool" hidden>لغو</button>
+<button id="cancel" class="navtool" aria-label="لغو ترسیم" hidden><svg viewBox="0 0 24 24"><path d="m5 5 14 14M19 5 5 19"/></svg><span>لغو</span></button>
 </div>
 <div id="backdrop" hidden></div>
 <section id="sheet" hidden aria-label="تنظیمات نمودار"><div class="handle"></div><div class="sheetheader"><strong id="sheettitle">ابزارها</strong><button id="closepanel" aria-label="بستن">×</button></div><div id="panel" hidden></div></section>
-<div hidden><button id="templates">قالب‌ها</button><button id="style">نوع چارت</button><button id="levels">ورود / SL / TP</button><button id="more">تاریخچه</button></div>
+<div hidden><button id="objects">ابزارها</button><button id="templates">قالب‌ها</button><button id="style">نوع چارت</button><button id="levels">ورود / SL / TP</button><button id="more">تاریخچه</button></div>
 </body></html>

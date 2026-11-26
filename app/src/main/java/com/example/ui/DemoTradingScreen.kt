@@ -6,6 +6,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -36,10 +37,10 @@ fun DemoTradingScreen(){
     val context=LocalContext.current.applicationContext
     val scope=rememberCoroutineScope()
     var state by remember{mutableStateOf(loadDemo(context))}
-    var symbol by remember{mutableStateOf("BTCUSDT")}
+    var symbol by rememberSaveable{mutableStateOf("BTCUSDT")}
     var long by remember{mutableStateOf(true)}
-    var stop by remember{mutableStateOf("")}
-    var target by remember{mutableStateOf("")}
+    var stop by rememberSaveable{mutableStateOf("")}
+    var target by rememberSaveable{mutableStateOf("")}
     var risk by remember{mutableStateOf("1")}
     var pairs by remember{mutableStateOf<List<MarketPair>>(emptyList())}
     var quote by remember{mutableStateOf<Quote?>(null)}
@@ -47,7 +48,7 @@ fun DemoTradingScreen(){
     var busy by remember{mutableStateOf(false)}
     var confirm by remember{mutableStateOf(false)}
     var reset by remember{mutableStateOf(false)}
-    var chart by remember{mutableStateOf(false)}
+    var chart by rememberSaveable{mutableStateOf(false)}
     val account=state
     val active=account?.active
     val monitored=active?.symbol?:symbol
@@ -123,7 +124,7 @@ fun DemoTradingScreen(){
         TextButton(onClick={reset=true},enabled=!busy){Text("بازنشانی حساب دمو",color=MaterialTheme.colorScheme.error)}
         if(status.isNotBlank())Text(status)
     }
-    if(chart)AdvancedChartDialog(monitored,"15m",pairs.firstOrNull{it.symbol==monitored}?.pricePrecision?:8,"",stop,target,onDismiss={chart=false},onSelect={kind,price->if(state?.active==null){if(kind=="sl")stop=price;if(kind=="tp")target=price}})
+    if(chart)AdvancedChartDialog(monitored,"15m",pairs.firstOrNull{it.symbol==monitored}?.pricePrecision?:8,"",stop,target,onDismiss={chart=false},onSelect={kind,price->if(state?.active==null){if(kind=="sl")stop=price;if(kind=="tp")target=price}},symbols=pairs.associate{it.symbol to it.pricePrecision})
     if(confirm)AlertDialog(onDismissRequest={confirm=false},title={Text("تأیید معامله مجازی")},text={Text("با سرمایه تمرینی، قیمت بازار دوباره دریافت و حجم محاسبه می‌شود.")},confirmButton={Button(onClick={confirm=false;busy=true;scope.launch{try{val a=state?:error("No demo");require(a.active==null);val p=pair?:error("No pair");val q=MarketData.quotes(listOf(symbol))[symbol]?:error("No price");val t=sizing(p,q,a);commit(a.copy(active=t));status="پوزیشن تمرینی ثبت شد"}catch(e:CancellationException){throw e}catch(e:Exception){status=e.message?:"محاسبه تمرینی ناموفق"}finally{busy=false}}}){Text("باز کردن دمو")}},dismissButton={TextButton(onClick={confirm=false}){Text("لغو")}})
     if(reset)AlertDialog(onDismissRequest={reset=false},title={Text("بازنشانی فقط دمو؟")},text={Text("سرمایه مجازی به ۱۰۰۰ USDT برمی‌گردد و ژورنال دمو پاک می‌شود. حساب واقعی دست‌نخورده است.")},confirmButton={Button(onClick={commit(DemoState());reset=false}){Text("بازنشانی دمو")}},dismissButton={TextButton(onClick={reset=false}){Text("لغو")}})
 }

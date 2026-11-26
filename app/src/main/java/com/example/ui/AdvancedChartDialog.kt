@@ -7,18 +7,22 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.LayoutDirection
-import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.webkit.WebViewAssetLoader
 import com.example.data.*
 import kotlinx.coroutines.*
@@ -27,7 +31,6 @@ import kotlinx.coroutines.flow.conflate
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
-import java.math.BigDecimal
 import java.math.RoundingMode
 
 private const val chartUrl = "https://appassets.androidplatform.net/assets/chart/index.html"
@@ -40,45 +43,110 @@ private class ChartBridge(private val ready:()->Unit,private val older:(Long)->U
     @JavascriptInterface fun select(kind:String,value:String){if(kind in setOf("entry","sl","tp") && value.length<64)select.invoke(kind,value)}
 }
 @Composable
-fun AdvancedChartDialog(symbol:String, initialInterval:String, precision:Int, entry:String, stop:String, target:String, onDismiss:()->Unit,onSelect:(String,String)->Unit){
-    var interval by remember{mutableStateOf(initialInterval)}
-    var type by remember{mutableStateOf("LAST_PRICE")}
-    var tfMenu by remember{mutableStateOf(false)}
-    var priceMenu by remember{mutableStateOf(false)}
-    Dialog(onDismissRequest=onDismiss,properties=DialogProperties(usePlatformDefaultWidth=false,decorFitsSystemWindows=true)){
-        Surface(Modifier.fillMaxSize(),color=MaterialTheme.colorScheme.background){
-            Column(Modifier.fillMaxSize()){
-                Row(Modifier.fillMaxWidth().padding(horizontal=8.dp),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=androidx.compose.ui.Alignment.CenterVertically){
-                    Text(symbol,style=MaterialTheme.typography.titleMedium)
-                    Row(verticalAlignment=androidx.compose.ui.Alignment.CenterVertically) {
-                        Box {
-                            TextButton(onClick={tfMenu=true},contentPadding=PaddingValues(horizontal=8.dp)){Text(interval+" ▾")}
-                            DropdownMenu(expanded=tfMenu,onDismissRequest={tfMenu=false}){
-                                MarketData.intervals.forEach{t->DropdownMenuItem(text={Text(t)},onClick={interval=t;tfMenu=false})}
-                            }
-                        }
-                        Box {
-                            TextButton(onClick={priceMenu=true},contentPadding=PaddingValues(horizontal=6.dp)){Text(if(type=="LAST_PRICE")"Last ▾" else "Mark ▾")}
-                            DropdownMenu(expanded=priceMenu,onDismissRequest={priceMenu=false}){
-                                DropdownMenuItem(text={Text("Last Price")},onClick={type="LAST_PRICE";priceMenu=false})
-                                DropdownMenuItem(text={Text("Mark Price")},onClick={type="MARK_PRICE";priceMenu=false})
-                            }
-                        }
-                        TextButton(onClick=onDismiss,contentPadding=PaddingValues(horizontal=6.dp)){Text("بازگشت")}
-                    }
-                }
-                key(symbol,interval,type){
-                    AdvancedChart(symbol,interval,type,precision,entry,stop,target,onSelect,Modifier.weight(1f).fillMaxWidth())
-                }
+fun AdvancedChartDialog(
+    symbol: String,
+    initialInterval: String,
+    precision: Int,
+    entry: String,
+    stop: String,
+    target: String,
+    onDismiss: () -> Unit,
+    onSelect: (String, String) -> Unit,
+    symbols: Map<String, Int> = emptyMap(),
+    allowLevels: Boolean = true
+) {
+    var activeSymbol by rememberSaveable(symbol) { mutableStateOf(symbol) }
+    var interval by rememberSaveable(initialInterval) { mutableStateOf(initialInterval) }
+    var type by rememberSaveable { mutableStateOf("LAST_PRICE") }
+    var fullScreen by rememberSaveable { mutableStateOf(false) }
+    var menu by remember { mutableStateOf("") }
+    var query by remember { mutableStateOf("") }
+    val symbolsByName = remember(symbols, symbol, precision) { symbols + (symbol to precision) }
 
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = true)
+    ) {
+        val view = LocalView.current
+        DisposableEffect(view, fullScreen) {
+            val window = (view.parent as? DialogWindowProvider)?.window
+            val controller = window?.let { WindowCompat.getInsetsController(it, view) }
+            if (fullScreen) {
+                controller?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                controller?.hide(WindowInsetsCompat.Type.systemBars())
+            }
+            onDispose {
+                if (fullScreen) controller?.show(WindowInsetsCompat.Type.systemBars())
+            }
+        }
+        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(Modifier.weight(1f)) {
+                        TextButton(
+                            onClick = { query = ""; menu = "symbol" },
+                            contentPadding = PaddingValues(horizontal = 6.dp)
+                        ) { Text(activeSymbol + " ▾", maxLines = 1) }
+                        DropdownMenu(expanded = menu == "symbol", onDismissRequest = { menu = "" }) {
+                            OutlinedTextField(
+                                query, { query = it }, singleLine = true,
+                                label = { Text("جستجوی نماد") },
+                                modifier = Modifier.width(235.dp).padding(8.dp)
+                            )
+                            val matches = symbolsByName.keys.filter { it.contains(query.trim(), ignoreCase = true) }
+                            if (matches.isEmpty()) DropdownMenuItem(text = { Text("نمادی پیدا نشد") }, onClick = {})
+                            matches.take(12).forEach { item ->
+                                DropdownMenuItem(text = { Text(item) }, onClick = { activeSymbol = item; menu = "" })
+                            }
+                        }
+                    }
+                    Box {
+                        TextButton(
+                            onClick = { menu = "interval" }, contentPadding = PaddingValues(horizontal = 5.dp)
+                        ) { Text(interval + " ▾") }
+                        DropdownMenu(expanded = menu == "interval", onDismissRequest = { menu = "" }) {
+                            MarketData.intervals.forEach { item ->
+                                DropdownMenuItem(text = { Text(item) }, onClick = { interval = item; menu = "" })
+                            }
+                        }
+                    }
+                    Box {
+                        TextButton(
+                            onClick = { menu = "price" }, contentPadding = PaddingValues(horizontal = 5.dp)
+                        ) { Text(if (type == "LAST_PRICE") "Last ▾" else "Mark ▾") }
+                        DropdownMenu(expanded = menu == "price", onDismissRequest = { menu = "" }) {
+                            DropdownMenuItem(text = { Text("Last Price") }, onClick = { type = "LAST_PRICE"; menu = "" })
+                            DropdownMenuItem(text = { Text("Mark Price") }, onClick = { type = "MARK_PRICE"; menu = "" })
+                        }
+                    }
+                    IconButton(
+                        onClick = { fullScreen = !fullScreen },
+                        modifier = Modifier.semantics { contentDescription = if (fullScreen) "خروج از تمام‌صفحه" else "تمام‌صفحه" }
+                    ) { Text(if (fullScreen) "↙" else "⛶", style = MaterialTheme.typography.titleLarge) }
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.semantics { contentDescription = "بستن چارت" }
+                    ) { Text("×", style = MaterialTheme.typography.headlineSmall) }
+                }
+                val calculatorLinked = activeSymbol == symbol && allowLevels
+                key(activeSymbol, interval, type) {
+                    AdvancedChart(
+                        activeSymbol, interval, type, symbolsByName[activeSymbol] ?: precision,
+                        entry, stop, target, calculatorLinked, onSelect, Modifier.weight(1f).fillMaxWidth()
+                    )
+                }
             }
         }
     }
 }
 @SuppressLint("SetJavaScriptEnabled")
-@Composable private fun AdvancedChart(symbol:String,interval:String,type:String,precision:Int,entry:String,stop:String,target:String,onSelect:(String,String)->Unit,modifier:Modifier){
+@Composable private fun AdvancedChart(symbol:String,interval:String,type:String,precision:Int,entry:String,stop:String,target:String,calculatorLinked:Boolean,onSelect:(String,String)->Unit,modifier:Modifier){
     val scope=rememberCoroutineScope()
     val currentSelect by rememberUpdatedState(onSelect)
+    val currentPrecision by rememberUpdatedState(precision.coerceIn(0, 16))
     var ready by remember{mutableStateOf(false)}
     var web by remember{mutableStateOf<WebView?>(null)}
     var loadingOlder by remember{mutableStateOf(false)}
@@ -94,7 +162,11 @@ fun AdvancedChartDialog(symbol:String, initialInterval:String, precision:Int, en
         }
     }
     fun loadOlder(timestamp:Long){
-        if(!ready || loadingOlder || oldest<=0 || timestamp!=oldest)return
+        if (loadingOlder) return
+        if (!ready || oldest <= 0 || timestamp != oldest) {
+            js("window.SafeChart.olderFailed()")
+            return
+        }
         loadingOlder=true
         scope.launch{
             try{
@@ -108,8 +180,8 @@ fun AdvancedChartDialog(symbol:String, initialInterval:String, precision:Int, en
     DisposableEffect(Unit){onDispose{web?.let{it.removeJavascriptInterface("ChartNative");it.stopLoading();it.destroy()};web=null}}
     LaunchedEffect(ready){
         if(!ready)return@LaunchedEffect
-        val series=symbol+"|"+interval+"|"+type
-        js("window.SafeChart.init("+JSONObject.quote(series)+","+precision.coerceIn(0,16)+")")
+        val market = listOf(symbol, interval, type).joinToString(",") { JSONObject.quote(it) }
+        js("window.SafeChart.init($market,$currentPrecision,$calculatorLinked)")
         while(isActive){
             try{
                 val bars=MarketData.candles(symbol,interval,type,null,200)
@@ -130,7 +202,7 @@ fun AdvancedChartDialog(symbol:String, initialInterval:String, precision:Int, en
                     MarketLive.stream(symbol,interval,type).conflate().collect{live->
                         var start=MarketLive.nextOpen(lastClosed,interval)
                         // A gap or rollover is reconciled with REST, not filled with fake candles.
-                        if(live.eventTime>=MarketLive.nextOpen(start,interval) || live.eventTime<start){
+                        if(live.eventTime>=MarketLive.nextOpen(start,interval)){
                             val newer=MarketData.candles(symbol,interval,type,null,200).filter{it.time>=lastClosed}
                             if(newer.isNotEmpty()){
                                 lastClosed=newer.last().time
@@ -140,7 +212,7 @@ fun AdvancedChartDialog(symbol:String, initialInterval:String, precision:Int, en
                         }
                         if(live.eventTime>=start && live.eventTime<MarketLive.nextOpen(start,interval)){
                             js("window.SafeChart.tick("+candlesJson(listOf(Candle(start,live.open,live.high,live.low,live.close,live.volume)))+"[0])")
-                            status="WebSocket • کندل در حال تشکیل"
+                            status=""
                         }
                     }
                 }
@@ -149,15 +221,14 @@ fun AdvancedChartDialog(symbol:String, initialInterval:String, precision:Int, en
             delay(1500)
         }
     }
-    LaunchedEffect(ready,entry,stop,target,lastClosed){
-        if(ready && lastClosed>0) js("window.SafeChart.levels("+JSONObject.quote(entry)+","+JSONObject.quote(stop)+","+JSONObject.quote(target)+")")
+    LaunchedEffect(ready, currentPrecision) {
+        if (ready) js("window.SafeChart.precision($currentPrecision)")
     }
-    Column(modifier){
-        Text(status,style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(horizontal=8.dp))
-        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-        val h = maxHeight
-        val w = maxWidth
-        AndroidView(modifier=Modifier.requiredSize(w,h),factory={context->
+    LaunchedEffect(ready,entry,stop,target,lastClosed){
+        if(calculatorLinked && ready && lastClosed>0) js("window.SafeChart.levels("+JSONObject.quote(entry)+","+JSONObject.quote(stop)+","+JSONObject.quote(target)+")")
+    }
+    Box(modifier) {
+        AndroidView(modifier=Modifier.fillMaxSize(),factory={context->
             val loader=WebViewAssetLoader.Builder().addPathHandler("/assets/",WebViewAssetLoader.AssetsPathHandler(context)).build()
             WebView(context).apply{
                 web=this
@@ -177,7 +248,7 @@ fun AdvancedChartDialog(symbol:String, initialInterval:String, precision:Int, en
                     {ts->scope.launch{loadOlder(ts)}},
                     {kind,value->scope.launch{
                         val n=value.toBigDecimalOrNull()
-                        if(n!=null && n.signum()>0)currentSelect(kind,n.setScale(precision.coerceIn(0,16),RoundingMode.HALF_UP).stripTrailingZeros().toPlainString())
+                        if(calculatorLinked && n!=null && n.signum()>0)currentSelect(kind,n.setScale(currentPrecision,RoundingMode.HALF_UP).stripTrailingZeros().toPlainString())
                     }}
                 ),"ChartNative")
                 webViewClient=object:WebViewClient(){
@@ -198,7 +269,17 @@ fun AdvancedChartDialog(symbol:String, initialInterval:String, precision:Int, en
                 loadUrl(chartUrl)
             }
         })
-        LaunchedEffect(h,w,ready) { if(ready) { delay(100); web?.let { fit(it) }; delay(350); web?.let { fit(it) } } }
+        if (status.isNotBlank()) {
+            Surface(
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 8.dp, bottom = 55.dp),
+                color = MaterialTheme.colorScheme.surface
+            ) {
+                Text(
+                    status, style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                )
+            }
         }
     }
 }

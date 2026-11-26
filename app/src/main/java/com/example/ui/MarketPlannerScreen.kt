@@ -8,6 +8,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -32,21 +33,21 @@ fun MarketPlannerScreen(onManual: () -> Unit, onWatch: () -> Unit) {
     val pending = remember { context.getSharedPreferences("bitunix_planner_pending",0) }
     var unresolved by remember { mutableStateOf(pending.getString("id","") ?: "") }
     var pairs by remember { mutableStateOf<List<MarketPair>>(emptyList()) }
-    var symbol by remember { mutableStateOf("BTCUSDT") }
-    var interval by remember { mutableStateOf("15m") }
+    var symbol by rememberSaveable { mutableStateOf("BTCUSDT") }
+    var interval by rememberSaveable { mutableStateOf("15m") }
     var candles by remember { mutableStateOf<List<Candle>>(emptyList()) }
     var quote by remember { mutableStateOf<Quote?>(null) }
     var updated by remember { mutableStateOf(0L) }
     var marketError by remember { mutableStateOf("") }
     var available by remember { mutableStateOf<BigDecimal?>(null) }
-    var entry by remember { mutableStateOf("") }
-    var stop by remember { mutableStateOf("") }
-    var target by remember { mutableStateOf("") }
+    var entry by rememberSaveable { mutableStateOf("") }
+    var stop by rememberSaveable { mutableStateOf("") }
+    var target by rememberSaveable { mutableStateOf("") }
     var risk by remember { mutableStateOf("1") }
     var fee by remember { mutableStateOf("0.06") }
     var marketOrder by remember { mutableStateOf(false) }
     var long by remember { mutableStateOf(true) }
-    var advanced by remember { mutableStateOf(false) }
+    var advanced by rememberSaveable { mutableStateOf(false) }
     var pick by remember { mutableStateOf("entry") }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
@@ -195,7 +196,7 @@ fun MarketPlannerScreen(onManual: () -> Unit, onWatch: () -> Unit) {
     if (advanced) {
         AdvancedChartDialog(symbol, interval, pair?.pricePrecision ?: 8, entry, stop, target, onDismiss = { advanced = false }, onSelect = { kind, price ->
             when (kind) { "entry" -> entry = price; "sl" -> stop = price; "tp" -> target = price }
-        })
+        }, symbols = pairs.associate { it.symbol to it.pricePrecision })
     }
     preview?.let { v ->
         val d=v.draft

@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.List
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -106,8 +107,8 @@ fun TradingMenuScreen(onNavigate:(String)->Unit){
 fun ChartHomeScreen(){
     var pairs by remember{mutableStateOf<List<MarketPair>>(emptyList())}
     var search by remember{mutableStateOf("BTCUSDT")}
-    var symbol by remember{mutableStateOf("BTCUSDT")}
-    var open by remember{mutableStateOf(true)}
+    var symbol by rememberSaveable{mutableStateOf("BTCUSDT")}
+    var open by rememberSaveable{mutableStateOf(true)}
     var error by remember{mutableStateOf("")}
     var retry by remember{mutableIntStateOf(0)}
     LaunchedEffect(retry){try{pairs=MarketData.pairs();error=""}catch(e:CancellationException){throw e}catch(_:Exception){error="فهرست نمادها دریافت نشد؛ همچنان می‌توانید نماد را دستی وارد کنید"}}
@@ -121,5 +122,5 @@ fun ChartHomeScreen(){
         Button(enabled=MarketData.validSymbol(search),onClick={symbol=search;open=true},modifier=Modifier.fillMaxWidth()){Text("نمایش چارت تمام صفحه")}
         if(error.isNotBlank()){Text(error);TextButton(onClick={retry++}){Text("تلاش مجدد")}}
     }
-    if(open)AdvancedChartDialog(symbol,"15m",pairs.firstOrNull{it.symbol==symbol}?.pricePrecision?:8,"","","",onDismiss={open=false},onSelect={_,_->})
+    if(open)AdvancedChartDialog(symbol,"15m",pairs.firstOrNull{it.symbol==symbol}?.pricePrecision?:8,"","","",onDismiss={open=false},onSelect={_,_->},symbols=pairs.associate{it.symbol to it.pricePrecision},allowLevels=false)
 }
