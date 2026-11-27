@@ -70,21 +70,47 @@ def elements(m,dev,name):
 def xml():
     adb("shell","uiautomator","dump","/sdcard/safesize-qa.xml",timeout=35)
     return ET.fromstring(adb("shell","cat","/sdcard/safesize-qa.xml"))
+def label_rows(screen,label):
+    """Mobile MCP's compact output is the source of truth for Compose nodes."""
+    needle=json.dumps(label,ensure_ascii=False)
+    rows=[]
+    for line in screen.splitlines():
+        if not any((key+"="+needle) in line for key in ("text","label","name")):
+            continue
+        match=re.match(r"^(@\S+)\s",line)
+        bounds=re.search(r"\bat=(\d+),(\d+) size=(\d+)x(\d+)",line)
+        if match and bounds and "[disabled]" not in line:
+            x,y,w,h=map(int,bounds.groups())
+            if w>0 and h>0: rows.append((match.group(1),x+w//2,y+h//2))
+    return rows
+
 def tap_label(m,dev,label):
-    for _ in range(4):
-        try:
-            root=xml()
-            for n in root.iter("node"):
-                if label not in (n.get("text"),n.get("content-desc")): continue
-                coords=list(map(int,re.findall(r"\d+",n.get("bounds",""))))
-                if len(coords)!=4: continue
-                x1,y1,x2,y2=coords
-                if x2>x1 and y2>y1:
-                    m.tool("mobile_click_on_screen_at_coordinates",device=dev,x=(x1+x2)//2,y=(y1+y2)//2)
-                    return
-        except (ET.ParseError,subprocess.CalledProcessError): pass
+    last=""
+    for attempt in range(5):
+        last=m.text("mobile_list_elements_on_screen",device=dev,format="text")
+        rows=label_rows(last,label)
+        if len(rows)==1:
+            ref,x,y=rows[0]
+            print("MCP tap:",label,ref,x,y,flush=True)
+            # Use coordinates from the fresh MCP hierarchy rather than a second
+            # accessibility provider, which can merge Compose labels.
+            m.tool("mobile_click_on_screen_at_coordinates",device=dev,x=x,y=y)
+            return
+        if len(rows)>1:
+            raise RuntimeError("Ambiguous label: "+label)
         time.sleep(1)
-    raise RuntimeError("Missing label: "+label)
+    (OUT/"missing-label.txt").write_text(last,encoding="utf-8")
+    raise RuntimeError("Missing MCP label: "+label)
+
+def wait_screen(m,dev,name,required,attempts=8):
+    for _ in range(attempts):
+        s=elements(m,dev,name)
+        if any(label_rows(s,label) for label in required):
+            m.screenshot(dev,name)
+            return s
+        time.sleep(1)
+    m.screenshot(dev,name)
+    raise RuntimeError("Screen not confirmed: "+name+"; expected one of "+str(required))
 
 m=None
 try:
@@ -118,38 +144,31 @@ try:
     dev=candidate["id"]
     check("MCP device discovery","ADB="+adb_serial+" AVD="+avd+" MCP="+dev)
     m.tool("mobile_launch_app",device=dev,packageName=PACKAGE)
-    time.sleep(5)
-    s=elements(m,dev,"01-dashboard")
-    m.screenshot(dev,"01-dashboard")
-    if "داشبورد" not in s and not any(n.get("text")=="داشبورد" or n.get("content-desc")=="داشبورد" for n in xml().iter("node")):
-        raise RuntimeError("Dashboard navigation missing")
+    time.sleep(3)
+    s=wait_screen(m,dev,"01-dashboard",["کل دارایی (EQUITY)"])
+    if not label_rows(s,"نمودار آنلاین"):
+        raise RuntimeError("Online navigation missing")
     check("Native app launch and dashboard","MCP hierarchy + screenshot")
     tap_label(m,dev,"نمودار آنلاین")
-    time.sleep(2)
-    s=elements(m,dev,"02-online")
-    m.screenshot(dev,"02-online")
-    if "فضای کاری مشترک SafeSize" not in s and not any("فضای کاری مشترک SafeSize" in n.get("text","") for n in xml().iter("node")):
-        raise RuntimeError("Online workspace screen not displayed")
+    s=wait_screen(m,dev,"02-online",["فضای کاری مشترک SafeSize"])
     check("Native online workspace","Screen reached with MCP tap")
     tap_label(m,dev,"ماشین حساب")
-    time.sleep(2)
-    elements(m,dev,"03-calculator")
-    m.screenshot(dev,"03-calculator")
-    check("Calculator navigation","Screen captured")
+    wait_screen(m,dev,"03-calculator",["ماشین حساب ریسک"])
+    check("Calculator navigation","Calculator title verified")
     tap_label(m,dev,"ژورنال")
-    time.sleep(2)
-    elements(m,dev,"04-journal")
-    m.screenshot(dev,"04-journal")
-    check("Journal navigation","Screen captured")
+    wait_screen(m,dev,"04-journal",["تاریخچه معاملات","پوزیشن‌های در جریان"])
+    check("Journal navigation","Journal content verified")
     tap_label(m,dev,"نمودار آنلاین")
-    time.sleep(1)
+    wait_screen(m,dev,"02-online-return",["فضای کاری مشترک SafeSize"])
     tap_label(m,dev,"باز کردن فضای کاری آنلاین")
     time.sleep(12)
     s=elements(m,dev,"05-online-launch")
     m.screenshot(dev,"05-online-launch")
     REPORT["web"]="Browser launch attempted; live chart/auth/push require independent assertions"
     REPORT["foreground"]=m.text("mobile_get_foreground_app",device=dev) if "mobile_get_foreground_app" in names else "unknown"
-    check("Online button action","Captured resulting UI; web load not asserted")
+    if "("+PACKAGE+")" in REPORT["foreground"]:
+        raise RuntimeError("Online button did not open browser: "+REPORT["foreground"])
+    check("Online button action","Foreground switched: "+REPORT["foreground"]+"; live page not asserted")
 except Exception as e:
     REPORT["errors"].append(str(e))
     traceback.print_exc()
