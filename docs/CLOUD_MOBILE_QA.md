@@ -1,0 +1,3 @@
+# Cloud mobile QA
+
+The hosted GitHub runner boots an isolated Android 14 emulator with KVM, builds and installs the debug APK, starts the pinned Mobile MCP server on stdio, discovers the emulator, launches SafeSize and exercises native navigation. It uploads screenshots, accessibility snapshots, a JSON report and logcat. No real WordPress account or financial data is used. Live website load, cross-device authentication and push delivery are not asserted by this smoke test. The emulator is destroyed at job completion. No public ADB/MCP port, persistent VM, or local Windows setup is required. Each run consumes Actions minutes. For a new test scenario, change qa/mobile_smoke.py and push to unified-web-mobile. The workflow is not an always-on interactive MCP connector.
