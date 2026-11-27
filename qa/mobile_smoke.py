@@ -106,8 +106,17 @@ try:
     check("MCP handshake",str(len(names))+" tools")
     devices=m.text("mobile_list_available_devices")
     (OUT/"devices.txt").write_text(devices)
-    if dev not in devices: raise RuntimeError("MCP did not detect emulator: "+devices[:600])
-    check("MCP device discovery",dev)
+    discovered=json.loads(devices).get("devices", [])
+    online=[d for d in discovered if d.get("platform")=="android" and d.get("type")=="emulator" and d.get("state")=="online"]
+    if len(online)!=1 or not online[0].get("id"):
+        raise RuntimeError("Expected exactly one online MCP Android emulator: "+devices[:600])
+    adb_serial=dev
+    avd=adb("-s",adb_serial,"emu","avd","name").decode().splitlines()[0].strip()
+    candidate=online[0]
+    if candidate["id"]!=adb_serial and candidate.get("name")!=avd:
+        raise RuntimeError("MCP emulator does not match ADB AVD")
+    dev=candidate["id"]
+    check("MCP device discovery","ADB="+adb_serial+" AVD="+avd+" MCP="+dev)
     m.tool("mobile_launch_app",device=dev,packageName=PACKAGE)
     time.sleep(5)
     s=elements(m,dev,"01-dashboard")
