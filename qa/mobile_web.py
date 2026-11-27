@@ -184,6 +184,8 @@ def test_web(m,dev,adb,check,elements,tap_label,wait_screen,report,out,package):
         geometry(portrait);assert portrait["bars"]>=20
         c.screenshot(out/"12-web-portrait-return.png")
         check("Return to portrait","Chart and candles preserved")
+        from mobile_advanced import advanced_suite
+        advanced_suite(c, report, out, check, wait_for, inspect, ready, tap_dom)
         # Verify JS errors, but don't confuse expected unauthenticated 401 with page crashes.
         c.js("true")
         report["javascript_errors"]=c.errors;report["network"]=c.network
