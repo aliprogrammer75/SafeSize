@@ -12,6 +12,7 @@ class CDP:
         self.seq=0
         self.errors=[]
         self.network=[]
+        self.market_starts=[]
     def call(self,method,params=None):
         self.seq+=1
         self.ws.send(json.dumps({"id":self.seq,"method":method,"params":params or {}}))
@@ -25,6 +26,10 @@ class CDP:
             if method2=="Runtime.exceptionThrown":
                 d=p.get("exceptionDetails",{})
                 self.errors.append({"text":d.get("text"),"description":d.get("exception",{}).get("description","")[:800]})
+            if method2=="Network.requestWillBeSent":
+                u=urllib.parse.urlsplit(p.get("request",{}).get("url",""))
+                if u.hostname=="alifatemii.ir" and u.path.startswith("/safesize") and "market" in urllib.parse.parse_qs(u.query):
+                    self.market_starts.append({"id":p.get("requestId"),"query":u.query[:160],"wallTime":p.get("wallTime",0)})
             if method2=="Network.responseReceived":
                 v=p.get("response",{});u=urllib.parse.urlsplit(v.get("url",""))
                 if u.hostname=="alifatemii.ir" and u.path.startswith("/safesize"):

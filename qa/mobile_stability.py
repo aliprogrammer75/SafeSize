@@ -33,16 +33,31 @@ def stability_suite(c, m, dev, adb, report, out, check, wait_for, inspect):
             assert offline["ws"]["readyState"]==-1,"WebSocket still active"
             blocked=c.js("""readMarket('kline',{...market,limit:'3'}).then(()=>({blocked:false}),e=>({blocked:!!e.ssRestBlocked,message:e.message}))""")
             assert blocked["blocked"],str(blocked)
+            # Let calls already admitted before the offline event settle. The
+            # app's success counter counts cache hits / completed calls, not
+            # exclusively newly dispatched HTTP requests.
+            time.sleep(2)
+            settled=state()
+            report["offline_initial"]=offline
+            report["offline_settled"]=settled
             time.sleep(8)
             during=state()
+            report["offline_during"]=during
+            new_requests=[r for r in c.market_starts if r["wallTime"]>settled["now"]/1000]
+            report["offline_new_market_requests"]=new_requests
+            assert not new_requests,"New market HTTP requests initiated while offline: "+str(new_requests)
+            assert not during["online"] and during["status"]=="offline" and during["ws"]["readyState"]==-1,"Offline state not maintained"
+            assert during["rest"]["blocked"]>=settled["rest"]["blocked"],"Offline guard counter regressed"
             assert during["bars"]==offline["bars"] and during["last"]==offline["last"] and during["drawings"]==before["drawings"],"Cached chart or drawings changed offline"
-            assert during["rest"]["success"]==offline["rest"]["success"],"Unexpected successful market requests while offline"
+            assert during["rest"]["success"]==settled["rest"]["success"],"Market calls still completing after offline settle: "+str([settled["rest"],during["rest"]])
             c.screenshot(out/"stability-offline.png")
         finally:condition()
-        recovered=wait_for(lambda:(s if fresh(s:=state()) and s["rest"]["lastSuccess"]>during["rest"]["lastSuccess"] else None),90,"Fresh market data after reconnect")
+        reconnect_ms=state()["now"]
+        recovered=wait_for(lambda:(s if fresh(s:=state()) and s["rest"]["lastSuccess"]>during["rest"]["lastSuccess"] and any(r["wallTime"]>=reconnect_ms/1000 for r in c.market_starts) else None),90,"Fresh market data and actual HTTP request after reconnect")
         assert recovered["drawings"]==before["drawings"] and recovered["last"]>=before["last"] and recovered["gaps"]<=before["gaps"],"Data loss or gaps after reconnect"
         if before["status"]=="live":
             recovered=wait_for(lambda:(s if fresh(s:=state()) and s["status"]=="live" and s["ws"]["received"]>before["ws"]["received"] else None),90,"WebSocket fresh quotes after reconnect")
+        report["network_recovered"]=recovered
         c.screenshot(out/"stability-reconnected.png")
         return {"offline_status":during["status"],"rest_blocked":during["rest"]["blocked"],"recovered_status":recovered["status"],"received_before":before["ws"]["received"],"received_after":recovered["ws"]["received"],"gaps":recovered["gaps"],"retained_drawings":len(recovered["drawings"])}
     run("Controlled offline and recovery",offline_recovery)
