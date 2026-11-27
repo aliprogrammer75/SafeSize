@@ -63,10 +63,19 @@ def site_target():
             return t
     return None
 
+# The browser exposes id="chart" as a named Window property before the chart
+# library initializes. A DOM element is not a chart instance.
+PROBE = """(()=>{const root=document.documentElement;let c=null,initializedOk=false,rest=null;
+try{if(typeof chart!=='undefined'&&chart&&typeof chart.getDom==='function'&&typeof chart.getDataList==='function'&&typeof chart.getVisibleRange==='function'&&typeof chart.getBarSpace==='function')c=chart;}catch(_){}
+try{initializedOk=typeof initialized!=='undefined'&&initialized===true;}catch(_){}
+try{if(typeof readMarket==='function')rest=readMarket.ssRest31?.()??null;}catch(_){}
+const r=c?.getDom('candle_pane','main')?.getBoundingClientRect(),v=c?.getVisibleRange(),a=c?.getDataList()||[];
+return {url:location.href,title:document.title,documentReady:document.readyState,engine:!!c,ready:initializedOk&&!!c,phase:root?.dataset.ssThirtyFourReady??null,view:[innerWidth,innerHeight],screen:[screen.width,screen.height],dpr:devicePixelRatio,touch:navigator.maxTouchPoints,scrollWidth:root?.scrollWidth??0,plot:r?{x:r.x,y:r.y,w:r.width,h:r.height}:null,bars:a.length,last:a.length?{timestamp:a.at(-1).timestamp,close:a.at(-1).close}:null,range:v?{from:v.from,to:v.to}:null,space:c?c.getBarSpace():null,rest,body:document.body?.innerText.slice(0,250)??''}})()"""
 def inspect(c):
-    return c.js("""(()=>{const r=typeof chart!=='undefined'&&chart?.getDom('candle_pane','main')?.getBoundingClientRect();const v=typeof chart!=='undefined'&&chart?.getVisibleRange();const a=typeof chart!=='undefined'&&chart?.getDataList()||[];return {url:location.href,title:document.title,ready:typeof initialized!=='undefined'&&initialized,phase:document.documentElement.dataset.ssThirtyFourReady,view:[innerWidth,innerHeight],screen:[screen.width,screen.height],dpr:devicePixelRatio,touch:navigator.maxTouchPoints,scrollWidth:document.documentElement.scrollWidth,plot:r?{x:r.x,y:r.y,w:r.width,h:r.height}:null,bars:a.length,last:a.length?{timestamp:a.at(-1).timestamp,close:a.at(-1).close}:null,range:v?{from:v.from,to:v.to}:null,space:typeof chart!=='undefined'&&chart?chart.getBarSpace():null,rest:typeof readMarket==='function'?readMarket.ssRest31?.():null,body:document.body?.innerText.slice(0,250)}})()""")
-def ready(c):
+    return c.js(PROBE)
+def ready(c,report):
     s=inspect(c)
+    report["loading_state"]=s
     return s if s["ready"] and s["bars"]>=20 and s["plot"] and s["plot"]["w"]>100 and s["plot"]["h"]>80 else None
 def geometry(s):
     assert s["touch"]>0,"Not a touch device"
@@ -113,7 +122,7 @@ def test_web(m,dev,adb,check,elements,tap_label,wait_screen,report,out,package):
         c.call("Runtime.enable");c.call("Network.enable");c.call("Page.enable")
         # One reload to observe errors and actual responses from navigation onwards.
         c.call("Page.reload",{"ignoreCache":False})
-        s=wait_for(lambda:ready(c),90,"Live chart and real market data")
+        s=wait_for(lambda:ready(c,report),90,"Live chart and real market data")
         report["portrait"]=s;geometry(s)
         c.screenshot(out/"07-web-portrait.png");m.screenshot(dev,"07-mobile-portrait")
         check("Live Android chart","%d candles; %s viewport; plot %sx%s"%(s["bars"],s["view"],s["plot"]["w"],s["plot"]["h"]))
@@ -186,7 +195,8 @@ def test_web(m,dev,adb,check,elements,tap_label,wait_screen,report,out,package):
             try:
                 report["last_web_state"]=inspect(c)
                 c.screenshot(out/"web-final.png")
-            except Exception: pass
+            except Exception as diagnostic_error:
+                report["diagnostic_error"]=str(diagnostic_error)[:600]
             report["javascript_errors"]=c.errors;report["network"]=c.network
             c.close()
         try: adb("shell","settings","put","system","user_rotation","0")
