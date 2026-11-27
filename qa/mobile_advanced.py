@@ -47,7 +47,7 @@ def advanced_suite(c, report, out, check, wait_for, inspect, ready, tap_dom):
         assert d["name"]==name and len(d["points"])==n,str(d)
         assert all(isinstance(v,(int,float)) and math.isfinite(v) for q in d["points"] for v in (q["timestamp"],q["value"]))
         return d
-    report["advanced_scope"]="All declared point tools; text prompt excluded; brush separate; application API for indicators"
+    report["advanced_scope"]="All declared point tools; touch anchor editing; brush and text prompt; application API for indicators"
     for name in c.js("Object.keys(numberOfPoints)"):
         if name in ("ssText","ssBrush"): continue
         def draw(n=name):
@@ -65,24 +65,47 @@ def advanced_suite(c, report, out, check, wait_for, inspect, ready, tap_dom):
         c.touch("touchEnd",[]);time.sleep(.3)
         a=[d for d in rows() if d["id"] not in before]
         assert len(a)==1 and a[0]["name"]=="ssBrush" and len(a[0]["points"])>=3
-        return {"points":len(a[0]["points"])}
-    run("Touch brush",brush)
-    def edit():
-        d=make("segment")
-        q=c.js("(id=>{const d=drawings.find(x=>x.id===id);selection(id);const r=chart.getDom('candle_pane','main').getBoundingClientRect(),p=atPane(r.x+r.width/2,r.y+r.height/2),g=geometry(d,p,mapper(p));return {x:p.rect.left+g.points[1].x,y:p.rect.top+g.points[1].y}})("+json.dumps(d["id"])+")")
+        return a[0]
+    run("Touch brush",lambda:{"points":len(brush()["points"])})
+    def edit_one(d):
         p=plot()
-        assert p["x"]<q["x"]<p["x"]+p["w"] and p["y"]<q["y"]<p["y"]+p["h"]
-        c.touch("touchStart",[(q["x"],q["y"])])
+        q=c.js("(id=>{const d=drawings.find(x=>x.id===id);selection(id);const r=chart.getDom('candle_pane','main').getBoundingClientRect(),p=atPane(r.x+r.width/2,r.y+r.height/2),g=geometry(d,p,mapper(p));return g.points.map((q,i)=>({i,x:p.rect.left+q.x,y:p.rect.top+q.y}))})("+json.dumps(d["id"])+")")
+        candidates=[v for v in reversed(q) if p["x"]+15<v["x"]<p["x"]+p["w"]-35 and p["y"]+15<v["y"]<p["y"]+p["h"]-35]
+        assert candidates,"No editable anchor inside chart"
+        v=candidates[0]
+        c.touch("touchStart",[(v["x"],v["y"])])
         for i in range(1,9):
-            c.touch("touchMove",[(q["x"]+i*3,q["y"]+i*3)])
-            time.sleep(.06)
-        c.touch("touchEnd",[]);time.sleep(.3)
-        a=next(x for x in rows() if x["id"]==d["id"])
-        assert a["points"]!=d["points"],"Endpoint did not move"
-        assert a["points"][0]==d["points"][0],"First endpoint changed"
-        c.screenshot(out/"advanced-edit.png")
-        return {"before":d["points"],"after":a["points"]}
-    run("Touch endpoint edit",edit)
+            c.touch("touchMove",[(v["x"]+i*3,v["y"]+i*3)])
+            time.sleep(.055)
+        c.touch("touchEnd",[]);time.sleep(.25)
+        after=next(x for x in rows() if x["id"]==d["id"])
+        assert len(after["points"])==len(d["points"]) and after["points"]!=d["points"],"Anchor did not move: "+d["name"]
+        assert all(isinstance(n,(int,float)) and math.isfinite(n) for pt in after["points"] for n in pt.values())
+        if d["name"]=="segment" and v["i"]==1:assert after["points"][0]==d["points"][0],"Other endpoint changed"
+        return {"tool":d["name"],"anchor":v["i"],"before":d["points"],"after":after["points"]}
+    for name in c.js("Object.keys(numberOfPoints)"):
+        if name in ("ssText","ssBrush"):continue
+        def edit(n=name):
+            return edit_one(make(n))
+        run("Touch edit "+name,edit)
+    run("Touch edit brush",lambda:edit_one(brush()))
+    def text_tool():
+        clean()
+        before={d["id"] for d in rows()}
+        c.js("setTimeout(()=>startPlacement('ssText'),100);true")
+        time.sleep(.4)
+        c.call("Page.handleJavaScriptDialog",{"accept":True,"promptText":"SafeSize QA text"})
+        p=plot()
+        c.tap(p["x"]+.4*p["w"],p["y"]+.55*p["h"])
+        time.sleep(.25)
+        items=[d for d in rows() if d["id"] not in before]
+        assert len(items)==1 and items[0]["name"]=="ssText","Text drawing missing"
+        note=c.js("drawings.find(d=>d.id==="+json.dumps(items[0]["id"])+").config.note")
+        assert note=="SafeSize QA text",str(note)
+        c.screenshot(out/"advanced-text.png")
+        edit_one(items[0])
+        return {"text":note,"anchor_edit":True}
+    run("Text prompt placement and touch edit",text_tool)
     def history():
         d=make("segment")
         c.js("document.getElementById('undo').click();true")

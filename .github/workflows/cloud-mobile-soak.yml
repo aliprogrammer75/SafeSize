@@ -1,0 +1,73 @@
+name: SafeSize Android two hour endurance
+on:
+  push:
+    branches: [unified-web-mobile]
+    paths: ['.github/workflows/cloud-mobile-soak.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: safesize-mobile-soak-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  emulator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      MOBILEMCP_DISABLE_TELEMETRY: '1'
+      DO_NOT_TRACK: '1'
+      PYTHONUNBUFFERED: '1'
+      SAFESIZE_LONG_SOAK: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
+          log-accepted-android-sdk-licenses: 'false'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.6'
+      - name: Build APK
+        run: gradle --no-daemon :app:assembleDebug
+      - name: Install pinned Mobile MCP
+        run: |
+          npm install --prefix "$RUNNER_TEMP/mobile-mcp" --no-audit --no-fund @mobilenext/mobile-mcp@1.0.20
+          echo "$RUNNER_TEMP/mobile-mcp/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Install Chrome QA client
+        run: |
+          python3 -m venv "$RUNNER_TEMP/mobile-qa-venv"
+          "$RUNNER_TEMP/mobile-qa-venv/bin/pip" install --disable-pip-version-check websocket-client==1.8.0
+          echo "$RUNNER_TEMP/mobile-qa-venv/bin" >> "$GITHUB_PATH"
+      - name: Enable KVM on hosted runner
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+          test -r /dev/kvm && test -w /dev/kvm
+      - name: Run emulator and Mobile MCP
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          ram-size: 2048M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
+          script: python3 qa/mobile_smoke.py
+      - name: Publish test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: safesize-mobile-endurance
+          path: qa-output/
+          if-no-files-found: warn
+          retention-days: 7

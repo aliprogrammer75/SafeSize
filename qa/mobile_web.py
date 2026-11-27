@@ -1,6 +1,6 @@
 """Real Android Chrome regression suite, using local-only ADB/CDP on the disposable runner.
 No production credentials, no simulated market responses and no bypass of host challenges."""
-import json, time, pathlib, urllib.request, urllib.parse, base64, re
+import json, time, pathlib, urllib.request, urllib.parse, base64, re, os
 import websocket
 
 SITE="https://alifatemii.ir/safesize/"
@@ -12,6 +12,8 @@ class CDP:
         self.seq=0
         self.errors=[]
         self.network=[]
+        self.dialogs=[]
+        self.registrations={}
         self.market_starts=[]
     def call(self,method,params=None):
         self.seq+=1
@@ -23,6 +25,11 @@ class CDP:
                 if "error" in r: raise RuntimeError(method+": "+str(r["error"]))
                 return r.get("result",{})
             method2=r.get("method");p=r.get("params",{})
+            if method2=="Page.javascriptDialogOpening":
+                self.dialogs.append({"type":p.get("type"),"message":p.get("message")})
+            if method2=="ServiceWorker.workerRegistrationUpdated":
+                for reg in p.get("registrations",[]):
+                    self.registrations[reg["registrationId"]]=reg
             if method2=="Runtime.exceptionThrown":
                 d=p.get("exceptionDetails",{})
                 self.errors.append({"text":d.get("text"),"description":d.get("exception",{}).get("description","")[:800]})
@@ -189,10 +196,15 @@ def test_web(m,dev,adb,check,elements,tap_label,wait_screen,report,out,package):
         geometry(portrait);assert portrait["bars"]>=20
         c.screenshot(out/"12-web-portrait-return.png")
         check("Return to portrait","Chart and candles preserved")
-        from mobile_advanced import advanced_suite
-        advanced_suite(c, report, out, check, wait_for, inspect, ready, tap_dom)
-        from mobile_stability import stability_suite
-        stability_suite(c, m, dev, adb, report, out, check, wait_for, inspect)
+        from mobile_final import final_suite, long_soak
+        if os.environ.get("SAFESIZE_LONG_SOAK")=="1":
+            long_soak(c, m, dev, adb, report, out, check, inspect, wait_for)
+        else:
+            from mobile_advanced import advanced_suite
+            advanced_suite(c, report, out, check, wait_for, inspect, ready, tap_dom)
+            final_suite(c, m, dev, adb, report, out, check, inspect, wait_for, geometry, tap_dom)
+            from mobile_stability import stability_suite
+            stability_suite(c, m, dev, adb, report, out, check, wait_for, inspect)
         # Verify JS errors, but don't confuse expected unauthenticated 401 with page crashes.
         c.js("true")
         report["javascript_errors"]=c.errors;report["network"]=c.network
