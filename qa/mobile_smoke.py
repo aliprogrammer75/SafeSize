@@ -168,7 +168,9 @@ try:
     REPORT["foreground"]=m.text("mobile_get_foreground_app",device=dev) if "mobile_get_foreground_app" in names else "unknown"
     if "("+PACKAGE+")" in REPORT["foreground"]:
         raise RuntimeError("Online button did not open browser: "+REPORT["foreground"])
-    check("Online button action","Foreground switched: "+REPORT["foreground"]+"; live page not asserted")
+    check("Online button action","Foreground switched: "+REPORT["foreground"])
+    from mobile_web import test_web
+    test_web(m,dev,adb,check,elements,tap_label,wait_screen,REPORT,OUT,PACKAGE)
 except Exception as e:
     REPORT["errors"].append(str(e))
     traceback.print_exc()

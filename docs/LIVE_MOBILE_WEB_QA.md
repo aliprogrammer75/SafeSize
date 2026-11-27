@@ -1,0 +1,3 @@
+# Live Android Chrome QA
+
+Extends the verified native smoke test with anonymous first-run Chrome onboarding, local-only ADB devtools connection, actual HTTPS URL opened via SafeSize, real candle load (no fixture), viewport/overflow checks, touch pinch/pan, trend-line touch placement, sync/analysis dialogs, unauthenticated workspace isolation and real emulator rotation. JavaScript exceptions, real HTTP statuses and screenshots are uploaded even if a test fails. No production credentials are used; no authenticated sync or real Push delivery is claimed. Any WAF challenge/market outage is reported, never bypassed. Device data is ephemeral.
