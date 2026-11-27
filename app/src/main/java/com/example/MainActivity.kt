@@ -66,6 +66,7 @@ fun MainScreen() {
                 
                 val items = listOf(
                     Triple("dashboard", "داشبورد", Icons.Filled.Home),
+                    Triple("online", "نمودار آنلاین", Icons.Filled.Info),
                     Triple("calculator", "ماشین حساب", Icons.Filled.Add),
                     Triple("journal", "ژورنال", Icons.Filled.List),
                     Triple("analytics", "تحلیل‌ها", Icons.Filled.Info)
@@ -96,6 +97,7 @@ fun MainScreen() {
             modifier = Modifier.padding(innerPadding)
         ) {
             composable("dashboard") { DashboardScreen(viewModel) }
+            composable("online") { OnlineWorkspaceScreen() }
             composable("calculator") { TradeCalculatorScreen(viewModel) }
             composable("journal") { TradeJournalScreen(viewModel) }
             composable("analytics") { TradeAnalyticsScreen(viewModel) }
