@@ -3,6 +3,7 @@ QA marker is local synthetic fixture, not user data. Read-only API assertions
 and guarded restoration are used independently of the product UI.
 """
 import json, time, uuid
+from playwright.sync_api import Error as PlaywrightError
 from mobile_web import wait_for, tap_dom
 
 READY="""(()=>!!(typeof initialized!=='undefined'&&initialized&&typeof chart?.getDataList==='function'&&chart.getDataList().length>=20&&document.querySelector('#ss-auto33-chip')&&document.querySelector('#ss-tools26')))()"""
@@ -14,8 +15,17 @@ class UI:
         self.page=page;self.cdp=cdp
     def js(self,expr):
         return self.page.evaluate(expr) if self.page else self.cdp.js(expr)
+    def read(self,expr):
+        # A reload after applying account settings legitimately destroys the JS context.
+        # Retry read-only probes, never repeat a mutation or a click automatically.
+        for attempt in range(12):
+            try:return self.js(expr)
+            except (PlaywrightError,RuntimeError) as e:
+                if not any(x in str(e).lower() for x in ("execution context was destroyed","cannot find context","cannot find default execution context","inspected target navigated","context was destroyed")):raise
+                time.sleep(.5)
+        raise RuntimeError("UI read context unavailable after navigation")
     def ready(self):
-        wait_for(lambda:self.js(READY),90,"UI chart ready")
+        wait_for(lambda:self.read(READY),90,"UI chart ready")
     def sel(self,selector):
         if self.page:self.page.locator(selector).click(timeout=15000)
         else:tap_dom(self.cdp,selector)
@@ -39,18 +49,18 @@ class UI:
                 try:self.js("document.querySelector('[data-qa-target]')?.removeAttribute('data-qa-target');true")
                 except Exception:pass
     def close(self):
-        if self.js("!!document.querySelector('dialog[open]')"):
+        if self.read("!!document.querySelector('dialog[open]')"):
             self.button("بستن")
     def sync_dialog(self):
         self.close();self.sel("#ss-auto33-chip")
     def replay_dialog(self):
         self.close();self.sel("#ss-tools26");self.button("انتقال جلسه Replay")
     def marker(self):
-        return self.js("JSON.parse(localStorage.getItem('tool:QaProbe')||'null')")
+        return self.read("JSON.parse(localStorage.getItem('tool:QaProbe')||'null')")
     def fixture(self,value):
         self.js("localStorage.setItem('tool:QaProbe',"+json.dumps(json.dumps(value))+");true")
     def state(self):
-        return self.js("document.querySelector('#ss-auto33-state')?.textContent||document.querySelector('#ss-auto33-chip')?.title||''")
+        return self.read("document.querySelector('#ss-auto33-state')?.textContent||document.querySelector('#ss-auto33-chip')?.title||''")
     def wait_marker(self,expected,seconds=100):
         def step():
             self.ready()
@@ -67,13 +77,13 @@ class UI:
         self.ready();self.sync_dialog();self.button("فعال‌سازی خودکار",True)
         self.wait_marker(expected)
         self.close()
-        wait_for(lambda:self.js("JSON.parse(localStorage.getItem('safesize:autosync:config:v1')||'{}').enabled===true"),20,"Sync enabled")
+        wait_for(lambda:self.read("JSON.parse(localStorage.getItem('safesize:autosync:config:v1')||'{}').enabled===true"),20,"Sync enabled")
     def disable(self):
         self.ready();self.sync_dialog();self.button("غیرفعال‌سازی");self.close()
     def bookmark(self):
-        return self.js("JSON.parse(localStorage.getItem("+json.dumps(RESUME)+")||'null')")
+        return self.read("JSON.parse(localStorage.getItem("+json.dumps(RESUME)+")||'null')")
     def replay_state(self):
-        return self.js("typeof replay!=='undefined'&&replay?{stamp:replay.bars[replay.index].timestamp,last:chart.getDataList().at(-1)?.timestamp}:null")
+        return self.read("typeof replay!=='undefined'&&replay?{stamp:replay.bars[replay.index].timestamp,last:chart.getDataList().at(-1)?.timestamp}:null")
 
 def run_ui(page,c,request,ok,revision,safe_workspace,check):
     d=UI(page=page);a=UI(cdp=c)
@@ -84,22 +94,40 @@ def run_ui(page,c,request,ok,revision,safe_workspace,check):
     original=initial["snapshot"]["entries"][KEY]
     assert original["owner"]=="safesize-qa-ci"
     own_bookmark=None
+    stage="bring independent browsers to foreground"
+    def checkpoint(name):
+        nonlocal stage
+        stage=name
+        print("UI STAGE:",stage,flush=True)
     try:
-        d.enable(original);a.enable(original)
+        checkpoint(stage)
+        page.bring_to_front()
+        c.call("Page.bringToFront")
+        d.ready();a.ready()
+        checkpoint("desktop enable and initial account application")
+        d.enable(original)
+        checkpoint("Android enable and initial account application")
+        a.enable(original)
         one={"owner":"safesize-qa-ci","marker":"qa-ui-desktop-"+uuid.uuid4().hex}
         two={"owner":"safesize-qa-ci","marker":"qa-ui-android-"+uuid.uuid4().hex}
+        checkpoint("desktop fixture and timer upload")
         d.fixture(one)
         # No manual send: exercise actual foreground interval and server read.
         wait_for(lambda:get("workspace=1")["snapshot"]["entries"].get(KEY)==one,140,"Desktop automatic upload")
+        checkpoint("Android receive and apply desktop change")
         a.wait_marker(one,150)
         check("Actual foreground UI autosync desktop to Android",{"timer_upload":True,"incoming_apply":True,"synthetic_fixture":True})
+        checkpoint("Android fixture and timer upload")
         a.fixture(two)
         wait_for(lambda:get("workspace=1")["snapshot"]["entries"].get(KEY)==two,140,"Android automatic upload")
+        checkpoint("desktop receive and apply Android change")
         d.wait_marker(two,150)
         check("Actual foreground UI autosync Android to desktop",{"timer_upload":True,"incoming_apply":True,"synthetic_fixture":True})
         # Stop sync before replay so no reload can interrupt either session.
+        checkpoint("disable sync before Replay")
         d.disable();a.disable()
         d.ready();a.ready()
+        checkpoint("desktop Replay start")
         stamp=d.js("chart.getDataList()[Math.max(1,chart.getDataList().length-30)].timestamp")
         # The date form is the existing product entry point, not a server POST.
         d.js("openDate('replay');document.getElementById('chart-date').value=new Date("+str(stamp)+").toISOString().slice(0,16);document.getElementById('date-form').requestSubmit();true")
@@ -109,20 +137,31 @@ def run_ui(page,c,request,ok,revision,safe_workspace,check):
         assert stepped["last"]==stepped["stamp"]
         own_bookmark=d.bookmark()
         assert own_bookmark and own_bookmark["stamp"]==stepped["stamp"] and own_bookmark["session"]
+        checkpoint("desktop Replay save through UI")
         d.replay_dialog();d.button("ذخیره موقعیت این دستگاه",True)
         saved=wait_for(lambda:(s if (s:=get("transfer=replay"))["payload"] and s["payload"]["session"]==own_bookmark["session"] else None),35,"UI Replay save")
         assert saved["payload"]["stamp"]==stepped["stamp"]
         d.close();d.sel("#replay-exit")
+        checkpoint("Android Replay resume through UI")
         a.replay_dialog();a.button("ادامه نشانک حساب",True)
         resumed=wait_for(a.replay_state,90,"Android actual Replay resume")
         restored=a.bookmark()
         assert resumed["stamp"]==stepped["stamp"]==resumed["last"]
         assert restored["session"]==own_bookmark["session"] and restored["slots"]==own_bookmark["slots"]
+        checkpoint("Android Replay next candle")
         a.sel("#replay-step")
         advanced=wait_for(lambda:(x if (x:=a.replay_state()) and x["stamp"]>resumed["stamp"] else None),20,"Android Replay next candle")
         assert advanced["last"]==advanced["stamp"]
         a.sel("#replay-exit")
         check("Actual Replay UI save and resume across devices",{"same_timestamp":True,"same_session":True,"same_slots":True,"next_candle":True,"no_future_candle_shown":True})
+    except Exception as e:
+        # Only classify known error patterns. Never output browser payloads, URLs,
+        # local storage or authentication values into the public Actions log.
+        msg=str(e).lower()
+        kinds=[("execution context was destroyed","navigation context reset"),("strict mode violation","ambiguous locator"),("not visible","hidden control"),("outside of the viewport","offscreen control"),("intercepts pointer events","blocked control"),("no dialog is showing","confirmation not open"),("timeout","timeout"),("referenceerror","JS reference error"),("typeerror","JS type error"),("syntaxerror","JS syntax error")]
+        reason=next((v for k,v in kinds if k in msg),type(e).__name__)
+        print("UI FAILURE:",stage,reason,flush=True)
+        raise RuntimeError("UI stage failed: "+stage+"; "+reason) from None
     finally:
         # Stop foreground synchronization before restoring known QA records.
         for device in (d,a):
