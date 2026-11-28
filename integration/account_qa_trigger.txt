@@ -11,3 +11,5 @@ Retry UI QA with navigation-safe probes, real dialog event handling and foregrou
 Retry UI QA after viewport reconciliation and visible-control geometry checks.
 
 Retry after bounded API transport and safe read retry improvements.
+
+Retry after decoupling Chrome startup from website navigation.
