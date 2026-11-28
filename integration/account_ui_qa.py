@@ -27,9 +27,26 @@ class UI:
         raise RuntimeError("UI read context unavailable after navigation")
     def ready(self):
         wait_for(lambda:self.read(READY),90,"UI chart ready")
+    def mobile_point(self,selector):
+        # The horizontally scrolling footer needs a settled layout and a genuine
+        # hit target; never force-click an offscreen or covered control.
+        self.cdp.call("Page.bringToFront")
+        expr="""(s=>{const e=document.querySelector(s),body=document.body;const info={viewport:[innerWidth,innerHeight],body:[body.offsetWidth,body.offsetHeight],foreground:!document.hidden,found:!!e};if(!e)return info;e.scrollIntoView({behavior:'instant',block:'nearest',inline:'center'});const r=e.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;const hit=document.elementFromPoint(x,y);return {...info,rect:[Math.round(r.x),Math.round(r.y),Math.round(r.width),Math.round(r.height)],x,y,hit:!!hit&&e.contains(hit),disabled:!!e.disabled,hidden:!!e.hidden}})("""
+        last={}
+        until=time.monotonic()+20
+        while time.monotonic()<until:
+            last=self.read(expr+json.dumps(selector)+")")
+            if last.get("foreground") and last.get("hit") and not last.get("disabled") and not last.get("hidden"):
+                return last
+            time.sleep(.5)
+        # Only numeric geometry and Boolean flags; no account or DOM content.
+        print("UI CONTROL GEOMETRY:",selector,last,flush=True)
+        raise RuntimeError("Control not visible or blocked after settling")
     def sel(self,selector):
         if self.page:self.page.locator(selector).click(timeout=15000)
-        else:tap_dom(self.cdp,selector)
+        else:
+            p=self.mobile_point(selector)
+            self.cdp.tap(p["x"],p["y"])
     def button(self,label,confirm=False):
         if self.page:
             if confirm:self.page.once("dialog",lambda d:d.accept())
@@ -42,6 +59,7 @@ class UI:
             assert self.js(expr+json.dumps(label)+")"),"UI button unavailable"
             try:
                 if confirm:
+                    self.mobile_point("[data-qa-target]")
                     self.cdp.dialogs.clear()
                     self.js("setTimeout(()=>document.querySelector('[data-qa-target]').click(),150);true")
                     # Replay confirmation is displayed only after a server GET;
@@ -59,7 +77,7 @@ class UI:
                         assert self.cdp.dialogs and self.cdp.dialogs[-1]["type"]=="confirm","Expected UI confirmation not opened"
                     finally:ws.settimeout(previous)
                     self.cdp.call("Page.handleJavaScriptDialog",{"accept":True})
-                else:tap_dom(self.cdp,"[data-qa-target]")
+                else:self.sel("[data-qa-target]")
             finally:
                 try:self.js("document.querySelector('[data-qa-target]')?.removeAttribute('data-qa-target');true")
                 except Exception:pass
