@@ -16,6 +16,7 @@ jobs:
     timeout-minutes: 30
     env:
       PYTHONUNBUFFERED: '1'
+      SAFESIZE_UI_QA: ${{ contains(github.event.head_commit.message, '[run-ui-qa]') && '1' || '0' }}
     steps:
       - name: Require a dedicated account secret
         env:
@@ -36,7 +37,7 @@ jobs:
           "$RUNNER_TEMP/account-qa/bin/pip" install --disable-pip-version-check websocket-client==1.8.0 playwright==1.51.0
           "$RUNNER_TEMP/account-qa/bin/python" -m playwright install --with-deps chromium
           echo "$RUNNER_TEMP/account-qa/bin" >> "$GITHUB_PATH"
-          "$RUNNER_TEMP/account-qa/bin/python" -m py_compile integration/account_qa.py
+          "$RUNNER_TEMP/account-qa/bin/python" -m py_compile integration/account_qa.py integration/account_ui_qa.py
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
