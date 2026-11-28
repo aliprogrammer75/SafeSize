@@ -13,3 +13,5 @@ Retry UI QA after viewport reconciliation and visible-control geometry checks.
 Retry after bounded API transport and safe read retry improvements.
 
 Retry after decoupling Chrome startup from website navigation.
+
+Retry with native Chrome launcher, installation and foreground diagnostics.
