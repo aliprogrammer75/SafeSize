@@ -77,7 +77,16 @@ class UI:
                         assert self.cdp.dialogs and self.cdp.dialogs[-1]["type"]=="confirm","Expected UI confirmation not opened"
                     finally:ws.settimeout(previous)
                     self.cdp.call("Page.handleJavaScriptDialog",{"accept":True})
-                else:self.sel("[data-qa-target]")
+                else:
+                    # Verify that a real touchscreen tap reached the intended control.
+                    # A scroll gesture may consume a tap; retry once only if no click fired.
+                    self.js("window.__qaClick=false;document.querySelector('[data-qa-target]').addEventListener('click',()=>window.__qaClick=true,{once:true,capture:true});true")
+                    self.sel("[data-qa-target]")
+                    time.sleep(.35)
+                    clicked=self.read("window.__qaClick===true || !document.querySelector('[data-qa-target]')")
+                    if not clicked:
+                        print("UI TOUCH: retry after missing click",flush=True)
+                        self.sel("[data-qa-target]")
             finally:
                 try:self.js("document.querySelector('[data-qa-target]')?.removeAttribute('data-qa-target');true")
                 except Exception:pass
@@ -85,7 +94,9 @@ class UI:
         if self.read("!!document.querySelector('dialog[open]')"):
             self.button("بستن")
     def sync_dialog(self):
+        if self.read("!!document.querySelector('dialog[open] #ss-auto33-state')"):return
         self.close();self.sel("#ss-auto33-chip")
+        wait_for(lambda:self.read("!!document.querySelector('dialog[open] #ss-auto33-state')"),10,"Sync dialog opened")
     def replay_dialog(self):
         self.close();self.sel("#ss-tools26");self.button("انتقال جلسه Replay")
     def marker(self):
@@ -94,23 +105,68 @@ class UI:
         self.js("localStorage.setItem('tool:QaProbe',"+json.dumps(json.dumps(value))+");true")
     def state(self):
         return self.read("document.querySelector('#ss-auto33-state')?.textContent||document.querySelector('#ss-auto33-chip')?.title||''")
-    def wait_marker(self,expected,seconds=100):
+    def sync_probe(self,expected):
+        # Only Boolean values and classified status; never log raw account data.
+        state=self.state()
+        kind=next((v for k,v in [
+            ("انتخاب نسخه لازم","conflict"),("آماده اعمال","pending"),
+            ("تغییر حساب آماده","busy_edit"),("همگام با حساب","synced"),
+            ("غیرفعال","disabled"),("وارد حساب شوید","login_required"),
+            ("متوقف موقت","temporary_error"),("نسخه حساب تغییر کرد","revision_changed"),
+            ("همگام‌سازی خودکار فعال است","enabled")
+        ] if k in state),"other")
+        facts=self.read("""(()=>{const c=JSON.parse(localStorage.getItem('safesize:autosync:config:v1')||'{}');return {enabled:c.enabled===true,foreground:!document.hidden,dialog:!!document.querySelector('dialog[open] #ss-auto33-state'),applyVisible:!!document.querySelector('#ss-auto33-apply:not([hidden])'),base:!!localStorage.getItem('safesize:autosync:base:v1'),markerPresent:!!localStorage.getItem('tool:QaProbe')}})()""")
+        return {**facts,"state":kind,"markerMatches":self.marker()==expected}
+    def wait_marker(self,expected,seconds=150):
+        last_log=0;last_action=0;last=None
         def step():
+            nonlocal last_log,last_action,last
             self.ready()
-            if self.marker()==expected:return True
-            msg=self.state()
-            if "تداخل" in msg and "انتخاب نسخه لازم" in msg:
-                self.sync_dialog();self.button("رفع تداخل: فقط بخش‌های متداخل از حساب",True)
-            elif "آماده اعمال" in msg or "تغییر حساب آماده" in msg:
-                self.sync_dialog();self.button("اعمال تغییرات دریافتی")
+            probe=self.sync_probe(expected)
+            now=time.monotonic()
+            if probe!=last or now-last_log>=15:
+                print("UI SYNC STATE:", "desktop" if self.page else "Android",probe,flush=True)
+                last=probe;last_log=now
+            if probe["markerMatches"] and probe["enabled"]:return True
+            if now-last_action>=5:
+                if probe["state"]=="conflict":
+                    self.sync_dialog()
+                    print("UI SYNC ACTION: choose account conflict version",flush=True)
+                    self.button("رفع تداخل: فقط بخش‌های متداخل از حساب",True)
+                    last_action=now
+                elif probe["state"]=="pending":
+                    self.sync_dialog()
+                    print("UI SYNC ACTION: apply incoming changes",flush=True)
+                    self.button("اعمال تغییرات دریافتی")
+                    last_action=now
             return False
         wait_for(step,seconds,"UI incoming QA marker")
         self.close()
     def enable(self,expected):
-        self.ready();self.sync_dialog();self.button("فعال‌سازی خودکار",True)
+        self.ready();self.sync_dialog()
+        print("UI SYNC ACTION: enable", "desktop" if self.page else "Android",flush=True)
+        self.button("فعال‌سازی خودکار",True)
+        # Do not wait for a periodic sync if the opt-in itself did not take effect.
+        # A second explicit enable is safe only while config remains disabled.
+        deadline=time.monotonic()+25; repeated=False
+        while time.monotonic()<deadline:
+            probe=self.sync_probe(expected)
+            if probe["enabled"]:
+                print("UI SYNC ENABLED:", "desktop" if self.page else "Android",probe,flush=True)
+                break
+            if probe["state"] in ("temporary_error","login_required"):
+                print("UI SYNC ENABLE FAILURE:",probe,flush=True)
+                raise RuntimeError("Sync activation server state: "+probe["state"])
+            if not repeated and deadline-time.monotonic()<10:
+                self.sync_dialog()
+                print("UI SYNC ACTION: retry explicit opt-in while disabled",flush=True)
+                self.button("فعال‌سازی خودکار",True)
+                repeated=True
+            time.sleep(1)
+        else:
+            print("UI SYNC ENABLE FAILURE:",self.sync_probe(expected),flush=True)
+            raise RuntimeError("Sync opt-in not enabled")
         self.wait_marker(expected)
-        self.close()
-        wait_for(lambda:self.read("JSON.parse(localStorage.getItem('safesize:autosync:config:v1')||'{}').enabled===true"),20,"Sync enabled")
     def disable(self):
         self.ready();self.sync_dialog();self.button("غیرفعال‌سازی");self.close()
     def bookmark(self):
