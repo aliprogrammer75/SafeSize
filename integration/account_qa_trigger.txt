@@ -3,3 +3,5 @@ Dedicated subscriber QA run requested 2026-11-28.
 Retry after pinning compatible OS and Python: 2026-11-28.
 
 Explicit cross-device UI QA requested.
+
+Retry UI QA after Android startup hardening and sanitized login checkpoints.
