@@ -2,6 +2,7 @@
 Never run with a real customer/admin account. No screenshots or credential logs.
 Only synthetic workspace, replay and encrypted journal records are written."""
 import os, sys, json, time, uuid, pathlib, subprocess, re, xml.etree.ElementTree as ET
+import websocket
 from playwright.sync_api import sync_playwright
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/"qa"))
 from mobile_web import CDP, site_target, wait_for
@@ -35,6 +36,9 @@ def chrome():
         target=site_target_safe()
         if target:
             c=CDP(target["webSocketDebuggerUrl"])
+            # A 15s CDP socket timeout was shorter than a slow server response.
+            # Allow the bounded browser fetch to finish before CDP times out.
+            c.ws.settimeout(45)
             c.call("Page.enable");c.call("Runtime.enable")
             c.call("Page.bringToFront")
             return c
@@ -53,7 +57,23 @@ def site_target_safe():
     except (OSError,ValueError):return None
 def request(evaluate,route,body=None,nonce=None):
     args=json.dumps({"route":route,"body":body,"nonce":nonce},ensure_ascii=False)
-    return evaluate("(async a=>{const r=await fetch('/safesize/?'+a.route,{cache:'no-store',credentials:'same-origin',...(a.body?{method:'POST',headers:{'Content-Type':'application/json','X-SafeSize-Nonce':a.nonce||''},body:JSON.stringify(a.body)}:{})});let d={};try{d=await r.json()}catch(_){}return {status:r.status,data:d}})("+args+")")
+    # Finite browser network deadline; retry only reads. A timed-out POST may
+    # already have committed, so it is never automatically submitted again.
+    expression="(async a=>{try{const r=await fetch('/safesize/?'+a.route,{signal:AbortSignal.timeout(23000),cache:'no-store',credentials:'same-origin',...(a.body?{method:'POST',headers:{'Content-Type':'application/json','X-SafeSize-Nonce':a.nonce||''},body:JSON.stringify(a.body)}:{})});let d={};try{d=await r.json()}catch(_){}return {status:r.status,data:d}}catch(e){return {status:0,transport:e.name}}})("+args+")"
+    for attempt in range(3 if body is None else 1):
+        try:
+            result=evaluate(expression)
+            if not isinstance(result,dict):raise RuntimeError("Missing API result")
+            if result.get("status")==0:
+                if body is None and attempt<2:
+                    print("QA READ RETRY:",route.split("&")[0],attempt+1,flush=True)
+                    time.sleep(2);continue
+                raise TimeoutError("Browser API transport failed")
+            return result
+        except (websocket.WebSocketTimeoutException,TimeoutError):
+            if body is not None or attempt==2:raise
+            print("QA READ RETRY:",route.split("&")[0],attempt+1,flush=True)
+            time.sleep(2)
 def ok(r,label):
     assert r["status"]==200,label+" HTTP "+str(r["status"])
     return r["data"]
@@ -64,7 +84,9 @@ def safe_workspace(r):
     s=r.get("snapshot")
     assert s is None or (set(s.get("entries",{}))=={"tool:QaProbe"} and s["entries"]["tool:QaProbe"].get("owner")==ACCOUNT),"Refusing to replace non-QA workspace"
 def workspace(e1,e2):
+    print("WORKSPACE STAGE: desktop initial read",flush=True)
     a=ok(request(e1,"workspace=1"),"Desktop workspace")
+    print("WORKSPACE STAGE: Android initial read",flush=True)
     b=ok(request(e2,"workspace=1"),"Android workspace")
     assert a.get("accountScope") and a["accountScope"]==b.get("accountScope")
     safe_workspace(a);safe_workspace(b);old=revision(a)
@@ -72,16 +94,23 @@ def workspace(e1,e2):
     def snapshot(v):
         return {"entries":{"tool:QaProbe":{"owner":ACCOUNT,"marker":v}},"preferences":{"axis":"normal","zone":"Etc/UTC","favorites":["BTCUSDT"]}}
     one=snapshot(tag)
+    print("WORKSPACE STAGE: desktop write",flush=True)
     saved=ok(request(e1,"workspace=1",{"revision":old,"snapshot":one},a["nonce"]),"Desktop save")
+    print("WORKSPACE STAGE: Android read of desktop write",flush=True)
     read=ok(request(e2,"workspace=1"),"Android read")
     assert read["snapshot"]==one and read["revision"]==saved["revision"]!=old
     two=snapshot(tag+"-android")
+    print("WORKSPACE STAGE: Android write",flush=True)
     saved2=ok(request(e2,"workspace=1",{"revision":revision(read),"snapshot":two},read["nonce"]),"Android save")
+    print("WORKSPACE STAGE: desktop read of Android write",flush=True)
     assert ok(request(e1,"workspace=1"),"Desktop read")["snapshot"]==two
+    print("WORKSPACE STAGE: stale revision rejection",flush=True)
     stale=request(e1,"workspace=1",{"revision":old,"snapshot":one},a["nonce"])
     assert stale["status"]==409,"Stale revision not rejected"
+    print("WORKSPACE STAGE: invalid nonce rejection",flush=True)
     invalid=request(e2,"workspace=1",{"revision":saved2["revision"],"snapshot":one},"invalid-qa-nonce")
     assert invalid["status"]==403,"Invalid nonce not rejected"
+    print("WORKSPACE STAGE: final verification",flush=True)
     assert ok(request(e1,"workspace=1"),"Read after rejection")["snapshot"]==two
     check("Two authenticated browsers workspace round trip",{"desktop_to_android":True,"android_to_desktop":True,"stale":409,"nonce":403})
 def replay_transfer(e1,e2):
