@@ -15,3 +15,5 @@ Retry after bounded API transport and safe read retry improvements.
 Retry after decoupling Chrome startup from website navigation.
 
 Retry with native Chrome launcher, installation and foreground diagnostics.
+
+Verify Android sync activation and incoming changes with safe state diagnostics.
