@@ -5,7 +5,7 @@ import os, sys, json, time, uuid, pathlib, subprocess, re, xml.etree.ElementTree
 import websocket
 from playwright.sync_api import sync_playwright
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/"qa"))
-from mobile_web import CDP, site_target, wait_for
+from mobile_web import CDP, targets, wait_for
 
 ORIGIN="https://alifatemii.ir"
 SITE=ORIGIN+"/safesize/"
@@ -28,33 +28,55 @@ def screen():
     adb("shell","uiautomator","dump","/sdcard/qa-window.xml")
     return ET.fromstring(adb("shell","cat","/sdcard/qa-window.xml"))
 def chrome():
-    # Fresh Android may still be starting Chrome after the emulator reports boot.
-    adb("shell","am","start","-a","android.intent.action.VIEW","-d",SITE,"-p","com.android.chrome")
+    # Do not require the live website to load in order to discover Chrome.
+    # Start a local blank tab, complete ordinary onboarding, then navigate
+    # the resulting page target to the dedicated account login.
+    adb("shell","am","start","-a","android.intent.action.VIEW","-d","about:blank","-p","com.android.chrome")
     adb("forward","tcp:9222","localabstract:chrome_devtools_remote")
-    end=time.monotonic()+100
+    end=time.monotonic()+150
+    launch_at=time.monotonic()
+    last_diag=0
     while time.monotonic()<end:
-        target=site_target_safe()
-        if target:
-            c=CDP(target["webSocketDebuggerUrl"])
-            # A 15s CDP socket timeout was shorter than a slow server response.
-            # Allow the bounded browser fetch to finish before CDP times out.
-            c.ws.settimeout(45)
-            c.call("Page.enable");c.call("Runtime.enable")
-            c.call("Page.bringToFront")
-            return c
         try:
-            node=next((n for n in screen().iter("node") if n.get("text") in ("Use without an account","No thanks","Not now","Got it")),None)
-            if node is not None:
-                nums=list(map(int,re.findall(r"\d+",node.get("bounds",""))))
-                if len(nums)==4:adb("shell","input","tap",str((nums[0]+nums[2])//2),str((nums[1]+nums[3])//2))
-            else:
-                adb("shell","am","start","-a","android.intent.action.VIEW","-d",SITE,"-p","com.android.chrome")
-        except (ET.ParseError,subprocess.SubprocessError):pass
-        time.sleep(4)
-    raise RuntimeError("Chrome startup not ready")
-def site_target_safe():
-    try:return site_target()
-    except (OSError,ValueError):return None
+            nodes=list(screen().iter("node"))
+        except (ET.ParseError,subprocess.SubprocessError):
+            nodes=[]
+        # Only standard Chrome first-run choices; never click a site prompt.
+        allowed=("use without an account","continue without an account","no thanks","not now","got it","accept & continue")
+        node=next((n for n in nodes if n.get("package")=="com.android.chrome" and ((n.get("text") or "").strip().lower() in allowed or (n.get("content-desc") or "").strip().lower() in allowed)),None)
+        if node is not None:
+            nums=list(map(int,re.findall(r"\d+",node.get("bounds",""))))
+            if len(nums)==4:
+                adb("shell","input","tap",str((nums[0]+nums[2])//2),str((nums[1]+nums[3])//2))
+                print("CHROME STARTUP: standard onboarding action",flush=True)
+                time.sleep(3)
+                continue
+        try:
+            pages=[t for t in targets() if t.get("type")=="page" and t.get("webSocketDebuggerUrl") and (t.get("url","").startswith(("about:blank","chrome://newtab","https://alifatemii.ir/","chrome-native://newtab")) or t.get("url","")=="" )]
+        except (OSError,ValueError):
+            pages=[]
+        if pages:
+            c=None
+            try:
+                c=CDP(pages[0]["webSocketDebuggerUrl"])
+                c.ws.settimeout(45)
+                c.call("Page.enable");c.call("Runtime.enable")
+                c.call("Page.bringToFront")
+                print("CHROME STARTUP: independent page target attached",flush=True)
+                return c
+            except (RuntimeError,OSError,websocket.WebSocketException):
+                if c:
+                    try:c.close()
+                    except Exception:pass
+        if time.monotonic()-last_diag>=15:
+            print("CHROME STARTUP:",{"page_targets":len(pages),"chrome_nodes":sum(n.get("package")=="com.android.chrome" for n in nodes)},flush=True)
+            last_diag=time.monotonic()
+        if time.monotonic()-launch_at>25:
+            adb("shell","am","start","-a","android.intent.action.VIEW","-d","about:blank","-p","com.android.chrome")
+            adb("forward","tcp:9222","localabstract:chrome_devtools_remote")
+            launch_at=time.monotonic()
+        time.sleep(3)
+    raise RuntimeError("Chrome page target not ready")
 def request(evaluate,route,body=None,nonce=None):
     args=json.dumps({"route":route,"body":body,"nonce":nonce},ensure_ascii=False)
     # Finite browser network deadline; retry only reads. A timed-out POST may
