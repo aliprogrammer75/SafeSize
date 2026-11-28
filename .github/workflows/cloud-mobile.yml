@@ -4,6 +4,12 @@ on:
     branches: [unified-web-mobile]
     paths: ['app/**', 'qa/**', '.github/workflows/cloud-mobile.yml', 'gradle/**', '*.gradle.kts']
   workflow_dispatch:
+    inputs:
+      suite:
+        description: "Full regression or focused final checks"
+        type: choice
+        options: [full, final]
+        default: full
 permissions:
   contents: read
 concurrency:
@@ -17,6 +23,7 @@ jobs:
       MOBILEMCP_DISABLE_TELEMETRY: '1'
       DO_NOT_TRACK: '1'
       PYTHONUNBUFFERED: '1'
+      SAFESIZE_FINAL_ONLY: ${{ (inputs.suite == 'final' || contains(github.event.head_commit.message, '[focus-final]')) && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4

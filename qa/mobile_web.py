@@ -199,6 +199,8 @@ def test_web(m,dev,adb,check,elements,tap_label,wait_screen,report,out,package):
         from mobile_final import final_suite, long_soak
         if os.environ.get("SAFESIZE_LONG_SOAK")=="1":
             long_soak(c, m, dev, adb, report, out, check, inspect, wait_for)
+        elif os.environ.get("SAFESIZE_FINAL_ONLY")=="1":
+            final_suite(c, m, dev, adb, report, out, check, inspect, wait_for, geometry, tap_dom)
         else:
             from mobile_advanced import advanced_suite
             advanced_suite(c, report, out, check, wait_for, inspect, ready, tap_dom)

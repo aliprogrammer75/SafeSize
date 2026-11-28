@@ -19,10 +19,13 @@ def final_suite(c,m,dev,adb,report,out,check,inspect,wait_for,geometry,tap_dom):
         before=c.js("JSON.stringify(drawings.map(d=>({id:d.id,points:d.points})))")
         try:
             for w,h in [(320,640),(360,800),(480,900)]:
-                adb("shell","wm","size",str(w*2)+"x"+str(h*2))
-                adb("shell","wm","density","320")
+                # Changing Android's system density kills the Chrome process/CDP socket.
+                # Keep the actual Android Chrome engine and emulate CSS screen metrics instead.
+                c.call("Emulation.setDeviceMetricsOverride",{"width":w,"height":h,"deviceScaleFactor":2,"mobile":True,"screenWidth":w,"screenHeight":h})
+                time.sleep(.4)
                 def valid():
                     s=inspect(c)
+                    report["resize_last_state"]=s
                     if not s["ready"] or abs(s["view"][0]-w)>8:return None
                     try:geometry(s)
                     except AssertionError:return None
@@ -40,15 +43,22 @@ def final_suite(c,m,dev,adb,report,out,check,inspect,wait_for,geometry,tap_dom):
         finally:
             try:c.js("document.querySelector('dialog[open]')?.close();true")
             except Exception:pass
-            adb("shell","wm","size","reset");adb("shell","wm","density","reset")
-            time.sleep(2)
-    run("Real Android screen size matrix 320/360/480",screen_size)
+            c.call("Emulation.clearDeviceMetricsOverride")
+            def restored():
+                s=inspect(c)
+                report["resize_restore_state"]=s
+                if not s["ready"]:return None
+                try:geometry(s)
+                except AssertionError:return None
+                return s
+            wait_for(restored,25,"Restore Android viewport")
+    run("Android Chrome emulated CSS screen matrix 320/360/480",screen_size)
     def notification_shade():
         # No real account or actual VAPID subscription. Test the actual worker's
         # push event via DevTools and require visible Android notification evidence.
         adb("shell","pm","grant","com.android.chrome","android.permission.POST_NOTIFICATIONS")
         c.call("Browser.grantPermissions",{"origin":"https://alifatemii.ir","permissions":["notifications"]})
-        sw=c.js("""(async()=>{const r=await navigator.serviceWorker.register('/safesize/?sw=1',{scope:'/safesize/',updateViaCache:'none'});const a=r.active?r:await navigator.serviceWorker.ready;return {scope:a.scope,active:!!a.active}})()""")
+        sw=c.js("""(async()=>{const timeout=(p,ms)=>Promise.race([p,new Promise((_,reject)=>setTimeout(()=>reject(Error('worker timeout')),ms))]);const r=await timeout(navigator.serviceWorker.register('/safesize/?sw=1',{scope:'/safesize/',updateViaCache:'none'}),15000);const a=r.active?r:await timeout(navigator.serviceWorker.ready,10000);return {scope:a.scope,active:!!a.active}})()""")
         assert sw["active"] and sw["scope"]=="https://alifatemii.ir/safesize/"
         c.call("ServiceWorker.enable")
         def registration():
@@ -59,13 +69,21 @@ def final_suite(c,m,dev,adb,report,out,check,inspect,wait_for,geometry,tap_dom):
             adb("shell","input","keyevent","KEYCODE_HOME")
             time.sleep(2)
             c.call("ServiceWorker.deliverPushMessage",{"origin":"https://alifatemii.ir","registrationId":reg,"data":json.dumps({"title":"SafeSize QA push","body":"Emulator push event","tag":"ss-qa-push"})})
-            time.sleep(3)
+            def delivered():
+                return c.js("(async()=>{const r=await navigator.serviceWorker.getRegistration('/safesize/');return (await r.getNotifications({tag:'ss-qa-push'})).map(n=>({title:n.title,tag:n.tag,body:n.body}))})()")
+            notices=wait_for(delivered,15,"Service worker push event notification")
+            report["worker_push_notifications"]=notices
+            assert any(n["title"]=="SafeSize QA push" for n in notices),str(notices)
             adb("shell","cmd","statusbar","expand-notifications")
             time.sleep(2)
             s=m.text("mobile_list_elements_on_screen",device=dev,format="text")
             (out/"final-notification-shade.txt").write_text(s,encoding="utf-8")
             m.screenshot(dev,"final-notification-shade")
-            assert "SafeSize QA push" in s or "Emulator push event" in s,"Notification not found in Android shade"
+            # Confirm through actual Android hierarchy, not just worker registration.
+            if "SafeSize QA push" not in s and "Emulator push event" not in s:
+                dump=adb("shell","dumpsys","notification").decode(errors="replace")
+                report["android_notification_diag"]={"chrome_notification_record":any("NotificationRecord" in line and "com.android.chrome" in line for line in dump.splitlines()),"title_in_dump":"SafeSize QA push" in dump}
+                raise AssertionError("Notification not found in Android shade; "+str(report["android_notification_diag"]))
             return {"android_shade_visible":True,"event":"CDP simulated push, real worker","external_delivery":False}
         finally:
             try:adb("shell","cmd","statusbar","collapse")
