@@ -1,6 +1,9 @@
 name: SafeSize dedicated account and real push QA
 on:
   workflow_dispatch:
+  push:
+    branches: [unified-web-mobile]
+    paths: ['integration/account_qa_trigger.txt']
 permissions:
   contents: read
 concurrency:
@@ -8,14 +11,15 @@ concurrency:
   cancel-in-progress: false
 jobs:
   qa:
-    if: github.ref == 'refs/heads/unified-web-mobile'
+    if: github.ref == 'refs/heads/unified-web-mobile' && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[run-account-qa]'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       PYTHONUNBUFFERED: '1'
-      SAFESIZE_QA_PASSWORD: ${{ secrets.SAFESIZE_QA_PASSWORD }}
     steps:
       - name: Require a dedicated account secret
+        env:
+          SAFESIZE_QA_PASSWORD: ${{ secrets.SAFESIZE_QA_PASSWORD }}
         run: |
           test -n "$SAFESIZE_QA_PASSWORD" || { echo 'Configure the dedicated subscriber secret first; never use a personal or admin password.'; exit 1; }
       - uses: actions/checkout@v4
@@ -36,6 +40,8 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - name: Independent desktop and Android account QA
+        env:
+          SAFESIZE_QA_PASSWORD: ${{ secrets.SAFESIZE_QA_PASSWORD }}
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
