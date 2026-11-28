@@ -27,21 +27,30 @@ def screen():
     adb("shell","uiautomator","dump","/sdcard/qa-window.xml")
     return ET.fromstring(adb("shell","cat","/sdcard/qa-window.xml"))
 def chrome():
+    # Fresh Android may still be starting Chrome after the emulator reports boot.
     adb("shell","am","start","-a","android.intent.action.VIEW","-d",SITE,"-p","com.android.chrome")
-    time.sleep(4)
-    for i in range(7):
-        try:
-            node=next((n for n in screen().iter("node") if n.get("text") in ("Use without an account","No thanks","Not now")),None)
-            if node is None:break
-            nums=list(map(int,re.findall(r"\d+",node.get("bounds",""))))
-            if len(nums)==4:adb("shell","input","tap",str((nums[0]+nums[2])//2),str((nums[1]+nums[3])//2))
-            time.sleep(2)
-        except (ET.ParseError,subprocess.SubprocessError):break
     adb("forward","tcp:9222","localabstract:chrome_devtools_remote")
-    adb("shell","am","start","-a","android.intent.action.VIEW","-d",SITE,"-p","com.android.chrome")
-    target=wait_for(site_target,45,"Android Chrome SafeSize")
-    c=CDP(target["webSocketDebuggerUrl"]);c.call("Page.enable");c.call("Runtime.enable")
-    return c
+    end=time.monotonic()+100
+    while time.monotonic()<end:
+        target=site_target_safe()
+        if target:
+            c=CDP(target["webSocketDebuggerUrl"])
+            c.call("Page.enable");c.call("Runtime.enable")
+            c.call("Page.bringToFront")
+            return c
+        try:
+            node=next((n for n in screen().iter("node") if n.get("text") in ("Use without an account","No thanks","Not now","Got it")),None)
+            if node is not None:
+                nums=list(map(int,re.findall(r"\d+",node.get("bounds",""))))
+                if len(nums)==4:adb("shell","input","tap",str((nums[0]+nums[2])//2),str((nums[1]+nums[3])//2))
+            else:
+                adb("shell","am","start","-a","android.intent.action.VIEW","-d",SITE,"-p","com.android.chrome")
+        except (ET.ParseError,subprocess.SubprocessError):pass
+        time.sleep(4)
+    raise RuntimeError("Chrome startup not ready")
+def site_target_safe():
+    try:return site_target()
+    except (OSError,ValueError):return None
 def request(evaluate,route,body=None,nonce=None):
     args=json.dumps({"route":route,"body":body,"nonce":nonce},ensure_ascii=False)
     return evaluate("(async a=>{const r=await fetch('/safesize/?'+a.route,{cache:'no-store',credentials:'same-origin',...(a.body?{method:'POST',headers:{'Content-Type':'application/json','X-SafeSize-Nonce':a.nonce||''},body:JSON.stringify(a.body)}:{})});let d={};try{d=await r.json()}catch(_){}return {status:r.status,data:d}})("+args+")")
@@ -166,19 +175,29 @@ def main():
         page=context.new_page()
         try:
             # Never print raw errors from login or save screenshots of credentials.
+            stage="desktop login form"
             try:
                 page.goto(LOGIN,wait_until="domcontentloaded",timeout=45000)
                 page.locator("#user_login").fill(ACCOUNT)
                 page.locator("#user_pass").fill(PASSWORD)
+                stage="desktop login redirect"
                 page.locator("#wp-submit").click(timeout=15000)
-                page.wait_for_url("**/safesize/**",timeout=30000)
+                page.wait_for_url("**/safesize/**",timeout=60000)
+                print("READY: Desktop login redirect",flush=True)
+                stage="Android Chrome startup"
                 c=chrome()
+                print("READY: Android Chrome startup",flush=True)
+                stage="Android login form"
                 c.call("Page.navigate",{"url":LOGIN})
-                wait_for(lambda:c.js("!!document.getElementById('user_login')&&!!document.getElementById('user_pass')"),30,"Android login form")
+                wait_for(lambda:c.js("!!document.getElementById('user_login')&&!!document.getElementById('user_pass')"),60,"Android login form")
+                print("READY: Android login form",flush=True)
+                stage="Android login redirect"
                 c.js("(a=>{document.getElementById('user_login').value=a.u;document.getElementById('user_pass').value=a.p;setTimeout(()=>document.getElementById('wp-submit').click(),100);return true})("+json.dumps({"u":ACCOUNT,"p":PASSWORD})+")")
-                wait_for(lambda:c.js("location.pathname.replace(/\\/$/,'')==='/safesize'&&document.readyState!=='loading'"),40,"Android login redirect")
-            except Exception:
-                raise RuntimeError("Dedicated QA login failed on desktop or Android; no authentication details logged") from None
+                wait_for(lambda:c.js("location.pathname.replace(/\\/$/,'')==='/safesize'&&document.readyState!=='loading'"),75,"Android login redirect")
+                print("READY: Android login redirect",flush=True)
+            except Exception as e:
+                fail("Authentication stage",{"stage":stage,"error_type":type(e).__name__})
+                raise RuntimeError("Dedicated QA login failed; no authentication details logged") from None
             desktop=page.evaluate
             # Every mutation is gated on independent authentication, matching account scope
             # and records that are empty or known synthetic QA records.
