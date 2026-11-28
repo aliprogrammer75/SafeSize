@@ -1,0 +1,21 @@
+Dedicated subscriber QA run requested 2026-11-28.
+
+Retry after pinning compatible OS and Python: 2026-11-28.
+
+Explicit cross-device UI QA requested.
+
+Retry UI QA after Android startup hardening and sanitized login checkpoints.
+
+Retry UI QA with navigation-safe probes, real dialog event handling and foreground-first test order.
+
+Retry UI QA after viewport reconciliation and visible-control geometry checks.
+
+Retry after bounded API transport and safe read retry improvements.
+
+Retry after decoupling Chrome startup from website navigation.
+
+Retry with native Chrome launcher, installation and foreground diagnostics.
+
+Verify Android sync activation and incoming changes with safe state diagnostics.
+
+Verify foreground periodic scheduler after timing correction and source-state diagnostics.

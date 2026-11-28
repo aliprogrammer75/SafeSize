@@ -14,8 +14,8 @@ android {
         applicationId = "com.example"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1-unified"
     }
 
     buildTypes {
@@ -33,6 +33,7 @@ android {
 }
 
 dependencies {
+    implementation("androidx.browser:browser:1.8.0")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
