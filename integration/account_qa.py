@@ -206,7 +206,7 @@ def main():
             assert a.get("accountScope") and a["accountScope"]==b.get("accountScope")
             safe_workspace(a);safe_workspace(b)
             check("Independent authenticated desktop and Android browser sessions",{"matching_scope":True})
-            for name,fn in [("Workspace",lambda:workspace(desktop,c.js)),("Replay",lambda:replay_transfer(desktop,c.js)),("Encrypted journal",lambda:journal(desktop,c.js)),("Actual VAPID push",lambda:push(c,desktop))]:
+            for name,fn in [("Workspace",lambda:workspace(desktop,c.js)),("Replay",lambda:replay_transfer(desktop,c.js)),("Encrypted journal",lambda:journal(desktop,c.js))]:
                 try:fn()
                 except Exception as e:
                     # Keep report safe: only exception class, no response body, cookie, or endpoint.
@@ -215,6 +215,9 @@ def main():
                 from account_ui_qa import run_ui
                 try:run_ui(page,c,request,ok,revision,safe_workspace,check)
                 except Exception as e:fail("Actual account UI suite",type(e).__name__)
+            # Keep the push/background transition separate from foreground UI acceptance.
+            try:push(c,desktop)
+            except Exception as e:fail("Actual VAPID push",type(e).__name__)
             if any(x["status"]=="fail" for x in REPORT["checks"]):raise RuntimeError("One or more dedicated account cases failed")
         finally:
             if c:
