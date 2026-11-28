@@ -167,6 +167,22 @@ class UI:
             print("UI SYNC ENABLE FAILURE:",self.sync_probe(expected),flush=True)
             raise RuntimeError("Sync opt-in not enabled")
         self.wait_marker(expected)
+    def wait_upload(self,expected,get,seconds=180):
+        # Observe the real periodic uploader, without manual sync or API writes.
+        last_log=0;last=None
+        def step():
+            nonlocal last_log,last
+            probe=self.sync_probe(expected)
+            server=get("workspace=1")
+            snapshot=server.get("snapshot") or {}
+            facts={**probe,"serverMarkerMatches":snapshot.get("entries",{}).get(KEY)==expected,
+                   "serverEntryCount":len(snapshot.get("entries",{}))}
+            now=time.monotonic()
+            if facts!=last or now-last_log>=15:
+                print("UI UPLOAD STATE:", "desktop" if self.page else "Android",facts,flush=True)
+                last=facts;last_log=now
+            return facts["serverMarkerMatches"]
+        wait_for(step,seconds,"Periodic Workspace upload")
     def disable(self):
         self.ready();self.sync_dialog();self.button("غیرفعال‌سازی");self.close()
     def bookmark(self):
@@ -202,13 +218,13 @@ def run_ui(page,c,request,ok,revision,safe_workspace,check):
         checkpoint("desktop fixture and timer upload")
         d.fixture(one)
         # No manual send: exercise actual foreground interval and server read.
-        wait_for(lambda:get("workspace=1")["snapshot"]["entries"].get(KEY)==one,140,"Desktop automatic upload")
+        d.wait_upload(one,get)
         checkpoint("Android receive and apply desktop change")
         a.wait_marker(one,150)
         check("Actual foreground UI autosync desktop to Android",{"timer_upload":True,"incoming_apply":True,"synthetic_fixture":True})
         checkpoint("Android fixture and timer upload")
         a.fixture(two)
-        wait_for(lambda:get("workspace=1")["snapshot"]["entries"].get(KEY)==two,140,"Android automatic upload")
+        a.wait_upload(two,get)
         checkpoint("desktop receive and apply Android change")
         d.wait_marker(two,150)
         check("Actual foreground UI autosync Android to desktop",{"timer_upload":True,"incoming_apply":True,"synthetic_fixture":True})
