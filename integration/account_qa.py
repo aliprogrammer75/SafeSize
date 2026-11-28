@@ -28,53 +28,64 @@ def screen():
     adb("shell","uiautomator","dump","/sdcard/qa-window.xml")
     return ET.fromstring(adb("shell","cat","/sdcard/qa-window.xml"))
 def chrome():
-    # Do not require the live website to load in order to discover Chrome.
-    # Start a local blank tab, complete ordinary onboarding, then navigate
-    # the resulting page target to the dedicated account login.
-    adb("shell","am","start","-a","android.intent.action.VIEW","-d","about:blank","-p","com.android.chrome")
+    # Chrome's Android VIEW intent does not reliably resolve about:blank.
+    # Open the actual launcher activity first, independently of network access.
+    pkg="com.android.chrome"
+    installed=adb("shell","pm","path",pkg).decode(errors="replace")
+    if "package:" not in installed:raise RuntimeError("Chrome package not installed")
+    adb("shell","input","keyevent","KEYCODE_WAKEUP")
+    adb("shell","wm","dismiss-keyguard")
+    adb("shell","settings","put","system","screen_off_timeout","1800000")
+    def launch():
+        out=adb("shell","am","start","-W","-a","android.intent.action.MAIN","-c","android.intent.category.LAUNCHER","-p",pkg).decode(errors="replace")
+        success="Status: ok" in out or "Activity not started" in out
+        print("CHROME LAUNCH:",{"main_intent_ok":success},flush=True)
+        if not success:
+            out=adb("shell","monkey","-p",pkg,"-c","android.intent.category.LAUNCHER","1").decode(errors="replace")
+            print("CHROME LAUNCH:",{"launcher_event_injected":"Events injected: 1" in out},flush=True)
+    launch()
     adb("forward","tcp:9222","localabstract:chrome_devtools_remote")
     end=time.monotonic()+150
-    launch_at=time.monotonic()
-    last_diag=0
+    last_diag=0; relaunched=False; https_opened=False
+    allowed=("use without an account","continue without an account","no thanks","not now","got it","accept & continue")
     while time.monotonic()<end:
-        try:
-            nodes=list(screen().iter("node"))
-        except (ET.ParseError,subprocess.SubprocessError):
-            nodes=[]
-        # Only standard Chrome first-run choices; never click a site prompt.
-        allowed=("use without an account","continue without an account","no thanks","not now","got it","accept & continue")
-        node=next((n for n in nodes if n.get("package")=="com.android.chrome" and ((n.get("text") or "").strip().lower() in allowed or (n.get("content-desc") or "").strip().lower() in allowed)),None)
+        nodes=[]
+        try:nodes=list(screen().iter("node"))
+        except (ET.ParseError,subprocess.SubprocessError):pass
+        node=next((n for n in nodes if n.get("package")==pkg and ((n.get("text") or "").strip().lower() in allowed or (n.get("content-desc") or "").strip().lower() in allowed)),None)
         if node is not None:
             nums=list(map(int,re.findall(r"\d+",node.get("bounds",""))))
             if len(nums)==4:
                 adb("shell","input","tap",str((nums[0]+nums[2])//2),str((nums[1]+nums[3])//2))
                 print("CHROME STARTUP: standard onboarding action",flush=True)
-                time.sleep(3)
-                continue
+                time.sleep(3);continue
         try:
-            pages=[t for t in targets() if t.get("type")=="page" and t.get("webSocketDebuggerUrl") and (t.get("url","").startswith(("about:blank","chrome://newtab","https://alifatemii.ir/","chrome-native://newtab")) or t.get("url","")=="" )]
-        except (OSError,ValueError):
-            pages=[]
+            pages=[t for t in targets() if t.get("type")=="page" and t.get("webSocketDebuggerUrl")]
+        except (OSError,ValueError):pages=[]
         if pages:
             c=None
             try:
-                c=CDP(pages[0]["webSocketDebuggerUrl"])
-                c.ws.settimeout(45)
-                c.call("Page.enable");c.call("Runtime.enable")
-                c.call("Page.bringToFront")
-                print("CHROME STARTUP: independent page target attached",flush=True)
+                c=CDP(pages[0]["webSocketDebuggerUrl"]);c.ws.settimeout(45)
+                c.call("Page.enable");c.call("Runtime.enable");c.call("Page.bringToFront")
+                print("CHROME STARTUP: page target attached",flush=True)
                 return c
             except (RuntimeError,OSError,websocket.WebSocketException):
                 if c:
                     try:c.close()
                     except Exception:pass
+        elapsed=150-(end-time.monotonic())
         if time.monotonic()-last_diag>=15:
-            print("CHROME STARTUP:",{"page_targets":len(pages),"chrome_nodes":sum(n.get("package")=="com.android.chrome" for n in nodes)},flush=True)
+            activity=adb("shell","dumpsys","activity","activities").decode(errors="replace")
+            focused=any(pkg in line for line in activity.splitlines() if "mResumedActivity" in line or "topResumedActivity" in line)
+            print("CHROME STARTUP:",{"page_targets":len(pages),"chrome_nodes":sum(n.get("package")==pkg for n in nodes),"chrome_foreground":focused,"ui_nodes":len(nodes)},flush=True)
             last_diag=time.monotonic()
-        if time.monotonic()-launch_at>25:
-            adb("shell","am","start","-a","android.intent.action.VIEW","-d","about:blank","-p","com.android.chrome")
-            adb("forward","tcp:9222","localabstract:chrome_devtools_remote")
-            launch_at=time.monotonic()
+        if elapsed>35 and not https_opened:
+            # A normal HTTPS VIEW intent is supported by Chrome, unlike about:blank.
+            out=adb("shell","am","start","-W","-a","android.intent.action.VIEW","-d",SITE,"-p",pkg).decode(errors="replace")
+            print("CHROME LAUNCH:",{"https_intent_ok":"Status: ok" in out or "Activity not started" in out},flush=True)
+            https_opened=True
+        if elapsed>75 and not relaunched:
+            launch();adb("forward","tcp:9222","localabstract:chrome_devtools_remote");relaunched=True
         time.sleep(3)
     raise RuntimeError("Chrome page target not ready")
 def request(evaluate,route,body=None,nonce=None):
