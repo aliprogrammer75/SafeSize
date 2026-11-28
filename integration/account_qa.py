@@ -192,6 +192,10 @@ def main():
                 except Exception as e:
                     # Keep report safe: only exception class, no response body, cookie, or endpoint.
                     fail(name,type(e).__name__)
+            if os.environ.get("SAFESIZE_UI_QA")=="1" and not any(x["status"]=="fail" for x in REPORT["checks"]):
+                from account_ui_qa import run_ui
+                try:run_ui(page,c,request,ok,revision,safe_workspace,check)
+                except Exception as e:fail("Actual account UI suite",type(e).__name__)
             if any(x["status"]=="fail" for x in REPORT["checks"]):raise RuntimeError("One or more dedicated account cases failed")
         finally:
             if c:
