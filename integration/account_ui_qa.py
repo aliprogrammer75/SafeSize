@@ -3,6 +3,7 @@ QA marker is local synthetic fixture, not user data. Read-only API assertions
 and guarded restoration are used independently of the product UI.
 """
 import json, time, uuid
+import websocket
 from playwright.sync_api import Error as PlaywrightError
 from mobile_web import wait_for, tap_dom
 
@@ -41,8 +42,22 @@ class UI:
             assert self.js(expr+json.dumps(label)+")"),"UI button unavailable"
             try:
                 if confirm:
+                    self.cdp.dialogs.clear()
                     self.js("setTimeout(()=>document.querySelector('[data-qa-target]').click(),150);true")
-                    time.sleep(.7)
+                    # Replay confirmation is displayed only after a server GET;
+                    # wait for the actual dialog event rather than a fixed delay.
+                    end=time.monotonic()+25
+                    ws=self.cdp.ws
+                    previous=ws.gettimeout()
+                    try:
+                        ws.settimeout(1)
+                        while time.monotonic()<end and not self.cdp.dialogs:
+                            try:ev=json.loads(ws.recv())
+                            except (websocket.WebSocketTimeoutException,TimeoutError):continue
+                            if ev.get("method")=="Page.javascriptDialogOpening":
+                                self.cdp.dialogs.append({"type":ev.get("params",{}).get("type")})
+                        assert self.cdp.dialogs and self.cdp.dialogs[-1]["type"]=="confirm","Expected UI confirmation not opened"
+                    finally:ws.settimeout(previous)
                     self.cdp.call("Page.handleJavaScriptDialog",{"accept":True})
                 else:tap_dom(self.cdp,"[data-qa-target]")
             finally:
@@ -87,7 +102,7 @@ class UI:
 
 def run_ui(page,c,request,ok,revision,safe_workspace,check):
     d=UI(page=page);a=UI(cdp=c)
-    get=lambda route:ok(request(page.evaluate,route),"QA read")
+    get=lambda route:ok(request(d.read,route),"QA read")
     initial=get("workspace=1");safe_workspace(initial)
     prev=get("transfer=replay")
     assert prev["payload"] and prev["payload"]["session"].startswith("qa-"),"Expected synthetic API bookmark"
