@@ -12,7 +12,7 @@ concurrency:
 jobs:
   qa:
     if: github.ref == 'refs/heads/unified-web-mobile' && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[run-account-qa]'))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       PYTHONUNBUFFERED: '1'
@@ -27,6 +27,9 @@ jobs:
         with:
           packages: 'platform-tools platforms;android-34'
           log-accepted-android-sdk-licenses: 'false'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - name: Install isolated QA clients
         run: |
           python3 -m venv "$RUNNER_TEMP/account-qa"
